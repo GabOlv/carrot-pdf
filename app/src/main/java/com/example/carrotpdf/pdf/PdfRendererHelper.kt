@@ -12,6 +12,29 @@ data class PdfRenderResult(
     val pageCount: Int
 )
 
+fun getPdfPageCount(
+    context: Context,
+    uri: Uri
+): Int {
+    var fileDescriptor: ParcelFileDescriptor? = null
+    var pdfRenderer: PdfRenderer? = null
+
+    return try {
+        fileDescriptor = context.contentResolver.openFileDescriptor(uri, "r")
+            ?: return 0
+
+        pdfRenderer = PdfRenderer(fileDescriptor)
+
+        pdfRenderer.pageCount
+    } catch (exception: Exception) {
+        exception.printStackTrace()
+        0
+    } finally {
+        pdfRenderer?.close()
+        fileDescriptor?.close()
+    }
+}
+
 fun renderPdfPage(
     context: Context,
     uri: Uri,
