@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.IntSize
 
 @Stable
 class PdfViewportState(
@@ -20,8 +21,18 @@ class PdfViewportState(
     var panOffset by mutableStateOf(Offset.Zero)
         private set
 
+    var viewportSize by mutableStateOf(IntSize.Zero)
+        private set
+
     val displayZoom: Float
         get() = (committedZoom * transientScale).coerceIn(MIN_ZOOM, MAX_ZOOM)
+
+    val isTransformActive: Boolean
+        get() = transientScale != 1f || panOffset != Offset.Zero
+
+    fun updateViewportSize(size: IntSize) {
+        viewportSize = size
+    }
 
     fun setCommittedZoom(zoom: Float): Float {
         committedZoom = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)

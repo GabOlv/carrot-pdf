@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,7 +38,9 @@ import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.pdf.PdfPageCache
 import com.example.carrotpdf.pdf.renderPdfPage
 import com.example.carrotpdf.ui.design.CarrotColors
+import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageLayout
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
+import com.example.carrotpdf.ui.viewer.viewport.PdfViewport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
@@ -53,13 +53,12 @@ fun ContinuousPdfViewer(
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
-    val horizontalScrollState = rememberScrollState()
 
     val screenWidth = configuration.screenWidthDp.dp
-    val safeZoom = viewerState.zoom
-
-    val pageWidth = (screenWidth - 24.dp) * safeZoom
-    val viewerWidth = if (pageWidth > screenWidth) pageWidth + 24.dp else screenWidth
+    val pageLayout = rememberPdfPageLayout(
+        viewportWidth = screenWidth,
+        viewportState = viewerState.viewportState
+    )
 
     key(viewerState.documentId) {
         val listState = rememberLazyListState(
@@ -98,22 +97,23 @@ fun ContinuousPdfViewer(
                 }
         }
 
-        Box(
+        PdfViewport(
+            viewportState = viewerState.viewportState,
+            pageLayout = pageLayout,
             modifier = Modifier
                 .fillMaxSize()
                 .background(CarrotColors.PdfCanvas)
-                .horizontalScroll(horizontalScrollState)
         ) {
             LazyColumn(
                 modifier = Modifier
-                    .width(viewerWidth)
+                    .width(pageLayout.contentWidth)
                     .fillMaxHeight(),
                 state = listState,
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(pageLayout.pageSpacing),
                 contentPadding = PaddingValues(
-                    horizontal = 12.dp,
-                    vertical = 14.dp
+                    horizontal = pageLayout.horizontalPadding,
+                    vertical = pageLayout.verticalPadding
                 )
             ) {
                 items(
@@ -124,7 +124,8 @@ fun ContinuousPdfViewer(
                         context = context,
                         uri = uri,
                         pageIndex = pageIndex,
-                        pageWidth = pageWidth,
+                        pageWidth = pageLayout.pageWidth,
+                        pageHeight = pageLayout.pageHeight,
                         pageCache = pageCache
                     )
                 }
@@ -139,6 +140,7 @@ private fun PdfPageItem(
     uri: Uri,
     pageIndex: Int,
     pageWidth: androidx.compose.ui.unit.Dp,
+    pageHeight: androidx.compose.ui.unit.Dp,
     pageCache: PdfPageCache
 ) {
     var bitmap by remember(uri, pageIndex) {
@@ -180,7 +182,7 @@ private fun PdfPageItem(
     Card(
         modifier = Modifier
             .width(pageWidth)
-            .height(pageWidth * 1.414f),
+            .height(pageHeight),
         shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color.White
