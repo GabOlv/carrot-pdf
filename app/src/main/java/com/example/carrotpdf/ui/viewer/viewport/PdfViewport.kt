@@ -12,13 +12,17 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import com.example.carrotpdf.ui.design.CarrotColors
+import com.example.carrotpdf.ui.viewer.gesture.PdfGestureLayer
 import com.example.carrotpdf.ui.viewer.layout.PdfPageLayout
+import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.PdfViewportState
 
 @Composable
 fun PdfViewport(
+    viewerState: PdfViewerState,
     viewportState: PdfViewportState,
     pageLayout: PdfPageLayout,
+    onZoomCommitted: (Float) -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
@@ -30,7 +34,9 @@ fun PdfViewport(
             .onSizeChanged(viewportState::updateViewportSize)
             .horizontalScroll(horizontalScrollState)
     ) {
-        Box(
+        PdfGestureLayer(
+            viewerState = viewerState,
+            onZoomCommitted = onZoomCommitted,
             modifier = Modifier
                 .width(pageLayout.contentWidth)
                 .graphicsLayer {

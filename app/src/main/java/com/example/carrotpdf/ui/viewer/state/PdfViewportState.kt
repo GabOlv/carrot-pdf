@@ -37,6 +37,7 @@ class PdfViewportState(
     fun setCommittedZoom(zoom: Float): Float {
         committedZoom = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
         transientScale = 1f
+        panOffset = Offset.Zero
         return committedZoom
     }
 
@@ -46,13 +47,15 @@ class PdfViewportState(
 
     fun beginTransientZoom() {
         transientScale = 1f
+        panOffset = Offset.Zero
     }
 
     fun updateTransientTransform(
         scale: Float,
         pan: Offset
     ) {
-        transientScale = scale.coerceAtLeast(0.01f)
+        val targetDisplayZoom = (committedZoom * scale).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        transientScale = targetDisplayZoom / committedZoom
         panOffset += pan
     }
 

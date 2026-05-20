@@ -49,7 +49,8 @@ import kotlinx.coroutines.withContext
 fun ContinuousPdfViewer(
     uri: Uri,
     viewerState: PdfViewerState,
-    onCurrentPageChange: (Int) -> Unit
+    onCurrentPageChange: (Int) -> Unit,
+    onZoomCommitted: (Float) -> Unit
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -98,8 +99,10 @@ fun ContinuousPdfViewer(
         }
 
         PdfViewport(
+            viewerState = viewerState,
             viewportState = viewerState.viewportState,
             pageLayout = pageLayout,
+            onZoomCommitted = onZoomCommitted,
             modifier = Modifier
                 .fillMaxSize()
                 .background(CarrotColors.PdfCanvas)

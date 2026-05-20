@@ -204,6 +204,15 @@ private fun CarrotPdfContent(
                                 tab.copy(currentPageIndex = pageIndex)
                             }
                         }
+                    },
+                    onZoomCommitted = { zoom ->
+                        updateActiveTab(tabs, activeTabId) { tab ->
+                            if (tab.zoom == zoom) {
+                                tab
+                            } else {
+                                tab.copy(zoom = zoom)
+                            }
+                        }
                     }
                 )
             }
@@ -217,7 +226,8 @@ private fun PdfContentArea(
     viewerState: PdfViewerState?,
     isLoadingDocument: Boolean,
     onOpenPdf: () -> Unit,
-    onCurrentPageChange: (Int) -> Unit
+    onCurrentPageChange: (Int) -> Unit,
+    onZoomCommitted: (Float) -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -241,7 +251,8 @@ private fun PdfContentArea(
                 ContinuousPdfViewer(
                     uri = activeTab.uri,
                     viewerState = viewerState,
-                    onCurrentPageChange = onCurrentPageChange
+                    onCurrentPageChange = onCurrentPageChange,
+                    onZoomCommitted = onZoomCommitted
                 )
             }
         }

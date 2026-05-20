@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 
 @Stable
 class PdfViewerState(
@@ -61,6 +62,27 @@ class PdfViewerState(
 
     fun advanceZoomPreset(): Float {
         return viewportState.advanceZoomPreset()
+    }
+
+    fun beginTransientTransform() {
+        viewportState.beginTransientZoom()
+        interactionMode = PdfInteractionMode.Zooming
+    }
+
+    fun updateTransientTransform(
+        scale: Float,
+        pan: Offset
+    ) {
+        viewportState.updateTransientTransform(
+            scale = scale,
+            pan = pan
+        )
+    }
+
+    fun commitTransientTransform(): Float {
+        val zoom = viewportState.commitTransientZoom()
+        interactionMode = PdfInteractionMode.Idle
+        return zoom
     }
 
     fun requestScrollToPage(pageIndex: Int) {
