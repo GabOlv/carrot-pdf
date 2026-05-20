@@ -9,7 +9,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
-import com.example.carrotpdf.pdf.renderPdfPage
 import com.example.carrotpdf.ui.viewer.state.PdfVisiblePages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +20,11 @@ import kotlin.coroutines.coroutineContext
 class PdfRenderSchedulerState(
     private val context: Context,
     private val uri: Uri,
-    private val cache: PdfRenderCache = PdfRenderCache()
+    private val cache: PdfRenderCache = PdfRenderCache(),
+    private val documentSession: PdfDocumentSession = PdfDocumentSession(
+        context = context,
+        uri = uri
+    )
 ) {
     private val pageStates = mutableStateMapOf<PdfRenderKey, PdfPageRenderState>()
 
@@ -55,23 +58,19 @@ class PdfRenderSchedulerState(
             var renderedBitmap: Bitmap? = null
 
             try {
-                val result = withContext(Dispatchers.IO) {
-                    renderPdfPage(
-                        context = context,
-                        uri = uri,
-                        pageIndex = key.pageIndex
-                    )
+                renderedBitmap = withContext(Dispatchers.IO) {
+                    documentSession.renderPage(key)
                 }
-
-                renderedBitmap = result?.bitmap
 
                 coroutineContext.ensureActive()
 
-                if (result == null) {
+                val bitmap = renderedBitmap
+
+                if (bitmap == null) {
                     pageStates[key] = PdfPageRenderState.Failed
                 } else {
-                    cache.put(key, result.bitmap)
-                    pageStates[key] = PdfPageRenderState.Ready(result.bitmap)
+                    cache.put(key, bitmap)
+                    pageStates[key] = PdfPageRenderState.Ready(bitmap)
                     renderedBitmap = null
                 }
             } catch (exception: CancellationException) {
@@ -91,6 +90,7 @@ class PdfRenderSchedulerState(
     fun clear() {
         pageStates.clear()
         cache.clear()
+        documentSession.close()
     }
 }
 
