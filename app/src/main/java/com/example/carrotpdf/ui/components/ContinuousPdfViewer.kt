@@ -40,53 +40,51 @@ import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.pdf.PdfPageCache
 import com.example.carrotpdf.pdf.renderPdfPage
 import com.example.carrotpdf.ui.design.CarrotColors
+import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 
 @Composable
 fun ContinuousPdfViewer(
-    tabId: String,
     uri: Uri,
-    pageCount: Int,
-    currentPageIndex: Int,
-    zoom: Float,
-    scrollTargetPage: Int?,
-    onCurrentPageChange: (Int) -> Unit,
-    onScrollTargetConsumed: () -> Unit
+    viewerState: PdfViewerState,
+    onCurrentPageChange: (Int) -> Unit
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val horizontalScrollState = rememberScrollState()
 
     val screenWidth = configuration.screenWidthDp.dp
-    val pageWidth = (screenWidth - 24.dp) * zoom
+    val safeZoom = viewerState.zoom
+
+    val pageWidth = (screenWidth - 24.dp) * safeZoom
     val viewerWidth = if (pageWidth > screenWidth) pageWidth + 24.dp else screenWidth
 
-    key(tabId) {
+    key(viewerState.documentId) {
         val listState = rememberLazyListState(
-            initialFirstVisibleItemIndex = currentPageIndex.coerceIn(
+            initialFirstVisibleItemIndex = viewerState.currentPageIndex.coerceIn(
                 0,
-                (pageCount - 1).coerceAtLeast(0)
+                (viewerState.pageCount - 1).coerceAtLeast(0)
             )
         )
 
-        val pageCache = remember(tabId, uri) {
+        val pageCache = remember(viewerState.documentId, uri) {
             PdfPageCache(maxPages = 5)
         }
 
-        DisposableEffect(tabId, uri) {
+        DisposableEffect(viewerState.documentId, uri) {
             onDispose {
                 pageCache.clear()
             }
         }
 
-        LaunchedEffect(scrollTargetPage) {
-            val target = scrollTargetPage
+        LaunchedEffect(viewerState.scrollTargetPage) {
+            val target = viewerState.scrollTargetPage
 
-            if (target != null && target in 0 until pageCount) {
+            if (target != null && target in 0 until viewerState.pageCount) {
                 listState.animateScrollToItem(target)
-                onScrollTargetConsumed()
+                viewerState.consumeScrollTarget()
             }
         }
 
@@ -94,7 +92,9 @@ fun ContinuousPdfViewer(
             snapshotFlow { listState.firstVisibleItemIndex }
                 .distinctUntilChanged()
                 .collect { visiblePageIndex ->
-                    onCurrentPageChange(visiblePageIndex)
+                    if (viewerState.updateCurrentPageIndex(visiblePageIndex)) {
+                        onCurrentPageChange(visiblePageIndex)
+                    }
                 }
         }
 
@@ -117,7 +117,7 @@ fun ContinuousPdfViewer(
                 )
             ) {
                 items(
-                    count = pageCount,
+                    count = viewerState.pageCount,
                     key = { pageIndex -> "$uri-$pageIndex" }
                 ) { pageIndex ->
                     PdfPageItem(
@@ -191,15 +191,11 @@ private fun PdfPageItem(
     ) {
         when {
             failed -> {
-                PageMessage(
-                    text = "Could not render page ${pageIndex + 1}"
-                )
+                PageMessage("Could not render page ${pageIndex + 1}")
             }
 
             bitmap == null -> {
-                PageMessage(
-                    text = "Rendering page ${pageIndex + 1}..."
-                )
+                PageMessage("Rendering page ${pageIndex + 1}...")
             }
 
             else -> {
