@@ -30,6 +30,9 @@ class PdfViewerState(
     var interactionMode by mutableStateOf(PdfInteractionMode.Idle)
         private set
 
+    var visiblePages by mutableStateOf(PdfVisiblePages.Empty)
+        private set
+
     val zoom: Float
         get() = viewportState.committedZoom
 
@@ -37,7 +40,8 @@ class PdfViewerState(
         get() = PdfViewerMetrics(
             pageCount = pageCount,
             currentPageIndex = currentPageIndex,
-            zoom = viewportState.displayZoom
+            zoom = viewportState.displayZoom,
+            visiblePageRange = visiblePages.visibleRange
         )
 
     fun updatePageCount(pageCount: Int) {
@@ -54,6 +58,10 @@ class PdfViewerState(
 
         currentPageIndex = nextPageIndex
         return true
+    }
+
+    fun updateVisiblePages(visiblePages: PdfVisiblePages) {
+        this.visiblePages = visiblePages
     }
 
     fun setZoom(zoom: Float): Float {

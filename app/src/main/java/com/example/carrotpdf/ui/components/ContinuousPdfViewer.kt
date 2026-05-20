@@ -27,7 +27,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,11 +37,11 @@ import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.pdf.PdfPageCache
 import com.example.carrotpdf.pdf.renderPdfPage
 import com.example.carrotpdf.ui.design.CarrotColors
+import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageVirtualizer
 import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageLayout
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.viewport.PdfViewport
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -69,6 +68,23 @@ fun ContinuousPdfViewer(
             )
         )
 
+        val virtualizerState = rememberPdfPageVirtualizer(
+            listState = listState,
+            pageCount = viewerState.pageCount,
+            onVisiblePagesChange = { visiblePages ->
+                viewerState.updateVisiblePages(visiblePages)
+
+                val firstVisiblePage = visiblePages.firstVisiblePage
+
+                if (
+                    firstVisiblePage != null &&
+                    viewerState.updateCurrentPageIndex(firstVisiblePage)
+                ) {
+                    onCurrentPageChange(firstVisiblePage)
+                }
+            }
+        )
+
         val pageCache = remember(viewerState.documentId, uri) {
             PdfPageCache(maxPages = 5)
         }
@@ -86,16 +102,6 @@ fun ContinuousPdfViewer(
                 listState.animateScrollToItem(target)
                 viewerState.consumeScrollTarget()
             }
-        }
-
-        LaunchedEffect(listState) {
-            snapshotFlow { listState.firstVisibleItemIndex }
-                .distinctUntilChanged()
-                .collect { visiblePageIndex ->
-                    if (viewerState.updateCurrentPageIndex(visiblePageIndex)) {
-                        onCurrentPageChange(visiblePageIndex)
-                    }
-                }
         }
 
         PdfViewport(
@@ -129,6 +135,7 @@ fun ContinuousPdfViewer(
                         pageIndex = pageIndex,
                         pageWidth = pageLayout.pageWidth,
                         pageHeight = pageLayout.pageHeight,
+                        shouldRender = virtualizerState.visiblePages.isActive(pageIndex),
                         pageCache = pageCache
                     )
                 }
@@ -144,6 +151,7 @@ private fun PdfPageItem(
     pageIndex: Int,
     pageWidth: androidx.compose.ui.unit.Dp,
     pageHeight: androidx.compose.ui.unit.Dp,
+    shouldRender: Boolean,
     pageCache: PdfPageCache
 ) {
     var bitmap by remember(uri, pageIndex) {
@@ -154,11 +162,20 @@ private fun PdfPageItem(
         mutableStateOf(false)
     }
 
-    LaunchedEffect(uri, pageIndex) {
+    LaunchedEffect(
+        uri,
+        pageIndex,
+        shouldRender
+    ) {
         val cachedBitmap = pageCache.get(pageIndex)
 
         if (cachedBitmap != null) {
             bitmap = cachedBitmap
+            failed = false
+            return@LaunchedEffect
+        }
+
+        if (!shouldRender) {
             failed = false
             return@LaunchedEffect
         }
@@ -199,8 +216,12 @@ private fun PdfPageItem(
                 PageMessage("Could not render page ${pageIndex + 1}")
             }
 
-            bitmap == null -> {
+            bitmap == null && shouldRender -> {
                 PageMessage("Rendering page ${pageIndex + 1}...")
+            }
+
+            bitmap == null -> {
+                PageMessage("Page ${pageIndex + 1}")
             }
 
             else -> {
