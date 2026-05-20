@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -133,7 +133,6 @@ fun ContinuousPdfViewer(
                         documentId = viewerState.documentId,
                         pageIndex = pageIndex,
                         pageWidth = pageLayout.pageWidth,
-                        pageHeight = pageLayout.pageHeight,
                         zoom = viewerState.zoom
                     )
                 }
@@ -148,7 +147,6 @@ private fun PdfPageItem(
     documentId: String,
     pageIndex: Int,
     pageWidth: androidx.compose.ui.unit.Dp,
-    pageHeight: androidx.compose.ui.unit.Dp,
     zoom: Float
 ) {
     val renderKey = remember(
@@ -164,6 +162,14 @@ private fun PdfPageItem(
     }
 
     val renderState = renderSchedulerState.stateFor(renderKey)
+    val pageAspectRatio = when (renderState) {
+        is PdfPageRenderState.Ready -> {
+            renderState.bitmap.height.toFloat() / renderState.bitmap.width.toFloat()
+        }
+
+        else -> DEFAULT_PAGE_ASPECT_RATIO
+    }
+    val pageHeight = pageWidth * pageAspectRatio
 
     Card(
         modifier = Modifier
@@ -194,12 +200,15 @@ private fun PdfPageItem(
                 Image(
                     bitmap = renderState.bitmap.asImageBitmap(),
                     contentDescription = "PDF page ${pageIndex + 1}",
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds
                 )
             }
         }
     }
 }
+
+private const val DEFAULT_PAGE_ASPECT_RATIO = 1.414f
 
 @Composable
 private fun PageMessage(

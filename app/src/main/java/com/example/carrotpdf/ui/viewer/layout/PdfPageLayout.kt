@@ -11,7 +11,6 @@ import com.example.carrotpdf.ui.viewer.state.PdfViewportState
 data class PdfPageLayout(
     val viewportWidth: Dp,
     val pageWidth: Dp,
-    val pageHeight: Dp,
     val contentWidth: Dp,
     val horizontalPadding: Dp,
     val verticalPadding: Dp,
@@ -31,7 +30,6 @@ fun rememberPdfPageLayout(
         val pageSpacing = 14.dp
         val basePageWidth = viewportWidth - (horizontalPadding * 2)
         val pageWidth = basePageWidth * committedZoom
-        val pageHeight = pageWidth * PAGE_ASPECT_RATIO
         val contentWidth = if (pageWidth > viewportWidth) {
             pageWidth + (horizontalPadding * 2)
         } else {
@@ -41,7 +39,6 @@ fun rememberPdfPageLayout(
         PdfPageLayout(
             viewportWidth = viewportWidth,
             pageWidth = pageWidth,
-            pageHeight = pageHeight,
             contentWidth = contentWidth,
             horizontalPadding = horizontalPadding,
             verticalPadding = verticalPadding,
@@ -49,5 +46,3 @@ fun rememberPdfPageLayout(
         )
     }
 }
-
-private const val PAGE_ASPECT_RATIO = 1.414f
