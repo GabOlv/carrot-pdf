@@ -2,6 +2,7 @@ package com.example.carrotpdf.ui.viewer.gesture
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
@@ -43,7 +44,6 @@ private suspend fun PointerInputScope.detectViewerTransformGestures(
         awaitFirstDown(requireUnconsumed = false)
 
         var isTransforming = false
-        var cumulativeScale = 1f
 
         do {
             val event = awaitPointerEvent()
@@ -52,14 +52,13 @@ private suspend fun PointerInputScope.detectViewerTransformGestures(
             if (pressedPointers > 1) {
                 if (!isTransforming) {
                     isTransforming = true
-                    cumulativeScale = 1f
                     viewerState.beginTransientTransform()
                 }
 
-                cumulativeScale *= event.calculateZoom()
                 viewerState.updateTransientTransform(
-                    scale = cumulativeScale,
-                    pan = event.calculatePan()
+                    zoomChange = event.calculateZoom(),
+                    pan = event.calculatePan(),
+                    centroid = event.calculateCentroid()
                 )
 
                 event.changes.forEach { pointerChange ->

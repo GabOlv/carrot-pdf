@@ -78,12 +78,14 @@ class PdfViewerState(
     }
 
     fun updateTransientTransform(
-        scale: Float,
-        pan: Offset
+        zoomChange: Float,
+        pan: Offset,
+        centroid: Offset
     ) {
         viewportState.updateTransientTransform(
-            scale = scale,
-            pan = pan
+            zoomChange = zoomChange,
+            pan = pan,
+            centroid = centroid
         )
     }
 

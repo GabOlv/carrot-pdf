@@ -24,6 +24,9 @@ class PdfViewportState(
     var viewportSize by mutableStateOf(IntSize.Zero)
         private set
 
+    var contentSize by mutableStateOf(IntSize.Zero)
+        private set
+
     val displayZoom: Float
         get() = (committedZoom * transientScale).coerceIn(MIN_ZOOM, MAX_ZOOM)
 
@@ -32,6 +35,12 @@ class PdfViewportState(
 
     fun updateViewportSize(size: IntSize) {
         viewportSize = size
+        panOffset = coercePanOffset(panOffset, transientScale)
+    }
+
+    fun updateContentSize(size: IntSize) {
+        contentSize = size
+        panOffset = coercePanOffset(panOffset, transientScale)
     }
 
     fun setCommittedZoom(zoom: Float): Float {
@@ -47,20 +56,34 @@ class PdfViewportState(
 
     fun beginTransientZoom() {
         transientScale = 1f
-        panOffset = Offset.Zero
+        panOffset = coercePanOffset(panOffset, transientScale)
     }
 
     fun updateTransientTransform(
-        scale: Float,
-        pan: Offset
+        zoomChange: Float,
+        pan: Offset,
+        centroid: Offset
     ) {
-        val targetDisplayZoom = (committedZoom * scale).coerceIn(MIN_ZOOM, MAX_ZOOM)
-        transientScale = targetDisplayZoom / committedZoom
-        panOffset += pan
+        val oldScale = transientScale
+        val targetDisplayZoom = (committedZoom * oldScale * zoomChange)
+            .coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val newScale = targetDisplayZoom / committedZoom
+        val appliedZoomChange = newScale / oldScale
+
+        transientScale = newScale
+        panOffset = coercePanOffset(
+            offset = (panOffset * appliedZoomChange) +
+                (centroid * (1f - appliedZoomChange)) +
+                pan,
+            scale = newScale
+        )
     }
 
     fun commitTransientZoom(): Float {
-        return setCommittedZoom(displayZoom)
+        committedZoom = displayZoom
+        transientScale = 1f
+        panOffset = coercePanOffset(panOffset, transientScale)
+        return committedZoom
     }
 
     fun resetPan() {
@@ -72,14 +95,42 @@ class PdfViewportState(
             currentZoom < 1.0f -> 1.0f
             currentZoom < 1.25f -> 1.25f
             currentZoom < 1.5f -> 1.5f
+            currentZoom < 2.0f -> 2.0f
+            currentZoom < 3.0f -> 3.0f
             currentZoom < MAX_ZOOM -> MAX_ZOOM
             else -> MIN_ZOOM
         }
     }
 
+    private fun coercePanOffset(
+        offset: Offset,
+        scale: Float
+    ): Offset {
+        val viewportWidth = viewportSize.width.toFloat()
+        val viewportHeight = viewportSize.height.toFloat()
+        val scaledContentWidth = contentSize.width * scale
+        val scaledContentHeight = contentSize.height * scale
+
+        val minX = if (scaledContentWidth > viewportWidth) {
+            viewportWidth - scaledContentWidth
+        } else {
+            0f
+        }
+        val minY = if (scaledContentHeight > viewportHeight) {
+            viewportHeight - scaledContentHeight
+        } else {
+            0f
+        }
+
+        return Offset(
+            x = offset.x.coerceIn(minX, 0f),
+            y = offset.y.coerceIn(minY, 0f)
+        )
+    }
+
     companion object {
         const val MIN_ZOOM = 0.85f
         const val DEFAULT_ZOOM = 1f
-        const val MAX_ZOOM = 2f
+        const val MAX_ZOOM = 4f
     }
 }

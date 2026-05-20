@@ -39,13 +39,14 @@ fun PdfViewport(
             onZoomCommitted = onZoomCommitted,
             modifier = Modifier
                 .width(pageLayout.contentWidth)
+                .onSizeChanged(viewportState::updateContentSize)
                 .graphicsLayer {
                     val transientScale = viewportState.transientScale
                     scaleX = transientScale
                     scaleY = transientScale
                     translationX = viewportState.panOffset.x
                     translationY = viewportState.panOffset.y
-                    transformOrigin = TransformOrigin(0.5f, 0f)
+                    transformOrigin = TransformOrigin(0f, 0f)
                 },
             content = content
         )
