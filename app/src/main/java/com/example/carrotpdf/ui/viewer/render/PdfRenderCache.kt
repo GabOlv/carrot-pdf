@@ -1,18 +1,21 @@
-package com.example.carrotpdf.pdf
+package com.example.carrotpdf.ui.viewer.render
 
 import android.graphics.Bitmap
 
-class PdfPageCache(
-    private val maxPages: Int = 5
+class PdfRenderCache(
+    private val maxEntries: Int = DEFAULT_MAX_ENTRIES
 ) {
-    private val cache = LinkedHashMap<Int, Bitmap>(maxPages, 0.75f, true)
+    private val cache = LinkedHashMap<PdfRenderKey, Bitmap>(maxEntries, 0.75f, true)
 
-    fun get(pageIndex: Int): Bitmap? {
-        return cache[pageIndex]?.takeIf { !it.isRecycled }
+    fun get(key: PdfRenderKey): Bitmap? {
+        return cache[key]?.takeIf { bitmap -> !bitmap.isRecycled }
     }
 
-    fun put(pageIndex: Int, bitmap: Bitmap) {
-        val oldBitmap = cache.put(pageIndex, bitmap)
+    fun put(
+        key: PdfRenderKey,
+        bitmap: Bitmap
+    ) {
+        val oldBitmap = cache.put(key, bitmap)
 
         if (oldBitmap != null && oldBitmap != bitmap && !oldBitmap.isRecycled) {
             oldBitmap.recycle()
@@ -32,7 +35,7 @@ class PdfPageCache(
     }
 
     private fun trim() {
-        while (cache.size > maxPages) {
+        while (cache.size > maxEntries) {
             val oldestKey = cache.keys.first()
             val bitmap = cache.remove(oldestKey)
 
@@ -40,5 +43,9 @@ class PdfPageCache(
                 bitmap.recycle()
             }
         }
+    }
+
+    private companion object {
+        const val DEFAULT_MAX_ENTRIES = 8
     }
 }
