@@ -11,6 +11,22 @@ class PdfRenderCache(
         return cache[key]?.takeIf { bitmap -> !bitmap.isRecycled }
     }
 
+    fun getClosestScale(key: PdfRenderKey): Bitmap? {
+        val fallbackKey = cache.entries
+            .filter { (cachedKey, bitmap) ->
+                cachedKey.documentId == key.documentId &&
+                    cachedKey.pageIndex == key.pageIndex &&
+                    cachedKey != key &&
+                    !bitmap.isRecycled
+            }
+            .minByOrNull { (cachedKey, _) ->
+                kotlin.math.abs(cachedKey.scaleBucketPercent - key.scaleBucketPercent)
+            }
+            ?.key
+
+        return fallbackKey?.let(::get)
+    }
+
     fun put(
         key: PdfRenderKey,
         bitmap: Bitmap
@@ -46,6 +62,6 @@ class PdfRenderCache(
     }
 
     private companion object {
-        const val DEFAULT_MAX_ENTRIES = 8
+        const val DEFAULT_MAX_ENTRIES = 12
     }
 }

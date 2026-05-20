@@ -35,7 +35,24 @@ class PdfRenderSchedulerState(
             return PdfPageRenderState.Ready(cachedBitmap)
         }
 
-        return pageStates[key] ?: PdfPageRenderState.NotRequested
+        val fallbackBitmap = cache.getClosestScale(key)
+        val currentState = pageStates[key]
+
+        if (fallbackBitmap != null) {
+            return when (currentState) {
+                PdfPageRenderState.Loading,
+                PdfPageRenderState.Failed,
+                PdfPageRenderState.NotRequested,
+                null -> PdfPageRenderState.Ready(
+                    bitmap = fallbackBitmap,
+                    isFallback = true
+                )
+
+                is PdfPageRenderState.Ready -> currentState
+            }
+        }
+
+        return currentState ?: PdfPageRenderState.NotRequested
     }
 
     suspend fun render(requests: List<PdfRenderRequest>) {
@@ -70,7 +87,7 @@ class PdfRenderSchedulerState(
                     pageStates[key] = PdfPageRenderState.Failed
                 } else {
                     cache.put(key, bitmap)
-                    pageStates[key] = PdfPageRenderState.Ready(bitmap)
+                    pageStates.remove(key)
                     renderedBitmap = null
                 }
             } catch (exception: CancellationException) {
