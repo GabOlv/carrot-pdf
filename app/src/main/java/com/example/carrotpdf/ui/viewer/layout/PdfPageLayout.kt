@@ -5,7 +5,6 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.carrotpdf.ui.viewer.state.PdfViewportState
 
 @Immutable
 data class PdfPageLayout(
@@ -19,27 +18,18 @@ data class PdfPageLayout(
 
 @Composable
 fun rememberPdfPageLayout(
-    viewportWidth: Dp,
-    viewportState: PdfViewportState
+    viewportWidth: Dp
 ): PdfPageLayout {
-    val committedZoom = viewportState.committedZoom
-
-    return remember(viewportWidth, committedZoom) {
+    return remember(viewportWidth) {
         val horizontalPadding = 12.dp
         val verticalPadding = 14.dp
         val pageSpacing = 14.dp
-        val basePageWidth = viewportWidth - (horizontalPadding * 2)
-        val pageWidth = basePageWidth * committedZoom
-        val contentWidth = if (pageWidth > viewportWidth) {
-            pageWidth + (horizontalPadding * 2)
-        } else {
-            viewportWidth
-        }
+        val pageWidth = viewportWidth - (horizontalPadding * 2)
 
         PdfPageLayout(
             viewportWidth = viewportWidth,
             pageWidth = pageWidth,
-            contentWidth = contentWidth,
+            contentWidth = viewportWidth,
             horizontalPadding = horizontalPadding,
             verticalPadding = verticalPadding,
             pageSpacing = pageSpacing

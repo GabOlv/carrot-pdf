@@ -132,9 +132,10 @@ fun PdfRenderScheduler(
     schedulerState: PdfRenderSchedulerState,
     documentId: String,
     visiblePages: PdfVisiblePages,
-    zoom: Float
+    renderQualityScale: Float,
+    onRenderQualityDisplayed: () -> Unit = {}
 ) {
-    val scaleBucketPercent = pdfRenderScaleBucketPercent(zoom)
+    val scaleBucketPercent = pdfRenderScaleBucketPercent(renderQualityScale)
 
     DisposableEffect(schedulerState) {
         onDispose {
@@ -148,25 +149,28 @@ fun PdfRenderScheduler(
         visiblePages,
         scaleBucketPercent
     ) {
-        schedulerState.render(
-            buildRenderRequests(
-                documentId = documentId,
-                visiblePages = visiblePages,
-                scaleBucketPercent = scaleBucketPercent
-            )
+        val requests = buildRenderRequests(
+            documentId = documentId,
+            visiblePages = visiblePages,
+            scaleBucketPercent = scaleBucketPercent
         )
+
+        if (requests.isNotEmpty()) {
+            schedulerState.render(requests)
+            onRenderQualityDisplayed()
+        }
     }
 }
 
 fun buildRenderKey(
     documentId: String,
     pageIndex: Int,
-    zoom: Float
+    renderQualityScale: Float
 ): PdfRenderKey {
     return PdfRenderKey(
         documentId = documentId,
         pageIndex = pageIndex,
-        scaleBucketPercent = pdfRenderScaleBucketPercent(zoom)
+        scaleBucketPercent = pdfRenderScaleBucketPercent(renderQualityScale)
     )
 }
 

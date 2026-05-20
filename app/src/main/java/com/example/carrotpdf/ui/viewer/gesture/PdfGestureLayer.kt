@@ -11,25 +11,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
-import com.example.carrotpdf.ui.viewer.state.PdfInteractionMode
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
+import kotlin.math.abs
 
 @Composable
 fun PdfGestureLayer(
     viewerState: PdfViewerState,
-    onZoomCommitted: (Float) -> Unit,
+    onTransformEnded: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val currentOnZoomCommitted by rememberUpdatedState(onZoomCommitted)
+    val currentOnTransformEnded by rememberUpdatedState(onTransformEnded)
 
     Box(
         modifier = modifier.pointerInput(viewerState.documentId) {
             detectViewerTransformGestures(
                 viewerState = viewerState,
-                onZoomCommitted = currentOnZoomCommitted
+                onTransformEnded = currentOnTransformEnded
             )
         },
         content = content
@@ -38,25 +39,33 @@ fun PdfGestureLayer(
 
 private suspend fun PointerInputScope.detectViewerTransformGestures(
     viewerState: PdfViewerState,
-    onZoomCommitted: (Float) -> Unit
+    onTransformEnded: () -> Unit
 ) {
     awaitEachGesture {
         awaitFirstDown(requireUnconsumed = false)
 
         var isTransforming = false
+        var isPanning = false
+        var hasMeaningfulZoom = false
 
         do {
             val event = awaitPointerEvent()
             val pressedPointers = event.changes.count { it.pressed }
 
             if (pressedPointers > 1) {
+                val zoomChange = event.calculateZoom()
+
                 if (!isTransforming) {
                     isTransforming = true
                     viewerState.beginTransientTransform()
                 }
 
+                if (abs(zoomChange - 1f) > MIN_ZOOM_DELTA) {
+                    hasMeaningfulZoom = true
+                }
+
                 viewerState.updateTransientTransform(
-                    zoomChange = event.calculateZoom(),
+                    zoomChange = zoomChange,
                     pan = event.calculatePan(),
                     centroid = event.calculateCentroid()
                 )
@@ -64,13 +73,43 @@ private suspend fun PointerInputScope.detectViewerTransformGestures(
                 event.changes.forEach { pointerChange ->
                     pointerChange.consume()
                 }
+            } else if (pressedPointers == 1 && viewerState.canPanContent()) {
+                val pan = event.calculatePan()
+
+                if (abs(pan.x) > abs(pan.y) && abs(pan.x) > MIN_PAN_DELTA) {
+                    if (!isPanning) {
+                        isPanning = true
+                        viewerState.beginPan()
+                    }
+
+                    val consumed = viewerState.updatePan(
+                        delta = Offset(
+                            x = pan.x,
+                            y = 0f
+                        )
+                    )
+
+                    if (consumed) {
+                        event.changes.forEach { pointerChange ->
+                            pointerChange.consume()
+                        }
+                    }
+                }
             }
         } while (event.changes.any { it.pressed })
 
         if (isTransforming) {
-            val committedZoom = viewerState.commitTransientTransform()
-            viewerState.updateInteractionMode(PdfInteractionMode.Idle)
-            onZoomCommitted(committedZoom)
+            if (hasMeaningfulZoom) {
+                viewerState.endTransientTransform()
+                onTransformEnded()
+            } else {
+                viewerState.cancelTransientTransform()
+            }
+        } else if (isPanning) {
+            viewerState.endPan()
         }
     }
 }
+
+private const val MIN_ZOOM_DELTA = 0.003f
+private const val MIN_PAN_DELTA = 0.5f

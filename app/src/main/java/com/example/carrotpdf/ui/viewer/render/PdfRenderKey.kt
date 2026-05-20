@@ -9,9 +9,9 @@ data class PdfRenderKey(
 )
 
 fun pdfRenderScaleBucketPercent(
-    zoom: Float
+    renderQualityScale: Float
 ): Int {
-    return ((zoom * 100f) / SCALE_BUCKET_STEP_PERCENT)
+    return ((renderQualityScale * 100f) / SCALE_BUCKET_STEP_PERCENT)
         .roundToInt()
         .coerceAtLeast(1) * SCALE_BUCKET_STEP_PERCENT
 }

@@ -34,7 +34,10 @@ class PdfViewerState(
         private set
 
     val zoom: Float
-        get() = viewportState.committedZoom
+        get() = viewportState.visualScale
+
+    val renderQualityScale: Float
+        get() = viewportState.renderQualityScale
 
     val metrics: PdfViewerMetrics
         get() = PdfViewerMetrics(
@@ -43,6 +46,9 @@ class PdfViewerState(
             zoom = viewportState.displayZoom,
             visiblePageRange = visiblePages.visibleRange
         )
+
+    val canUpdateCurrentPageFromScroll: Boolean
+        get() = interactionMode == PdfInteractionMode.Idle
 
     fun updatePageCount(pageCount: Int) {
         this.pageCount = pageCount.coerceAtLeast(0)
@@ -65,15 +71,17 @@ class PdfViewerState(
     }
 
     fun setZoom(zoom: Float): Float {
-        return viewportState.setCommittedZoom(zoom)
+        interactionMode = PdfInteractionMode.Idle
+        return viewportState.setVisualScale(zoom)
     }
 
     fun advanceZoomPreset(): Float {
+        interactionMode = PdfInteractionMode.Idle
         return viewportState.advanceZoomPreset()
     }
 
     fun beginTransientTransform() {
-        viewportState.beginTransientZoom()
+        viewportState.beginTransform()
         interactionMode = PdfInteractionMode.Zooming
     }
 
@@ -82,17 +90,58 @@ class PdfViewerState(
         pan: Offset,
         centroid: Offset
     ) {
-        viewportState.updateTransientTransform(
+        viewportState.updateTransform(
             zoomChange = zoomChange,
             pan = pan,
             centroid = centroid
         )
     }
 
-    fun commitTransientTransform(): Float {
-        val zoom = viewportState.commitTransientZoom()
-        interactionMode = PdfInteractionMode.Idle
+    fun canPanContent(): Boolean {
+        return viewportState.canPanContent
+    }
+
+    fun beginPan() {
+        interactionMode = PdfInteractionMode.Panning
+    }
+
+    fun updatePan(delta: Offset): Boolean {
+        return viewportState.panBy(delta)
+    }
+
+    fun endPan() {
+        if (interactionMode == PdfInteractionMode.Panning) {
+            interactionMode = PdfInteractionMode.Idle
+        }
+    }
+
+    fun beginSettlingTransform() {
+        interactionMode = PdfInteractionMode.Settling
+    }
+
+    fun endTransientTransform(): Float {
+        val zoom = viewportState.endTransform()
+        interactionMode = PdfInteractionMode.Settling
         return zoom
+    }
+
+    fun cancelTransientTransform() {
+        viewportState.cancelTransform()
+        interactionMode = PdfInteractionMode.Idle
+    }
+
+    fun refineRenderQualityIfNeeded(): Boolean {
+        return viewportState.refineRenderQualityIfNeeded()
+    }
+
+    fun markRenderQualityDisplayed() {
+        viewportState.markRenderQualityDisplayed()
+    }
+
+    fun finishSettling() {
+        if (interactionMode == PdfInteractionMode.Settling) {
+            interactionMode = PdfInteractionMode.Idle
+        }
     }
 
     fun requestScrollToPage(pageIndex: Int) {

@@ -1,11 +1,9 @@
 package com.example.carrotpdf.ui.viewer.viewport
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
@@ -22,28 +20,26 @@ fun PdfViewport(
     viewerState: PdfViewerState,
     viewportState: PdfViewportState,
     pageLayout: PdfPageLayout,
-    onZoomCommitted: (Float) -> Unit,
+    onTransformEnded: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val horizontalScrollState = rememberScrollState()
-
     Box(
         modifier = modifier
             .background(CarrotColors.PdfCanvas)
             .onSizeChanged(viewportState::updateViewportSize)
-            .horizontalScroll(horizontalScrollState)
     ) {
         PdfGestureLayer(
             viewerState = viewerState,
-            onZoomCommitted = onZoomCommitted,
+            onTransformEnded = onTransformEnded,
             modifier = Modifier
                 .width(pageLayout.contentWidth)
                 .onSizeChanged(viewportState::updateContentSize)
                 .graphicsLayer {
-                    val transientScale = viewportState.transientScale
-                    scaleX = transientScale
-                    scaleY = transientScale
+                    val visualScale = viewportState.visualScale
+
+                    scaleX = visualScale
+                    scaleY = visualScale
                     translationX = viewportState.panOffset.x
                     translationY = viewportState.panOffset.y
                     transformOrigin = TransformOrigin(0f, 0f)

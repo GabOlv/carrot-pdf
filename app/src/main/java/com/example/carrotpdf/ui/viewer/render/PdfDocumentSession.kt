@@ -93,8 +93,8 @@ class PdfDocumentSession(
     }
 
     private companion object {
-        const val BASE_RENDER_SCALE = 2f
+        const val BASE_RENDER_SCALE = 1.5f
         const val MIN_RENDER_SCALE = 1f
-        const val MAX_RENDER_SCALE = 5f
+        const val MAX_RENDER_SCALE = 2f
     }
 }

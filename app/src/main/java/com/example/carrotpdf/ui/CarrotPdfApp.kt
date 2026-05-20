@@ -180,6 +180,7 @@ private fun CarrotPdfContent(
                     onZoomClick = {
                         if (activeViewerState != null) {
                             val nextZoom = activeViewerState.advanceZoomPreset()
+                            activeViewerState.refineRenderQualityIfNeeded()
 
                             updateActiveTab(tabs, activeTabId) { tab ->
                                 tab.copy(zoom = nextZoom)
