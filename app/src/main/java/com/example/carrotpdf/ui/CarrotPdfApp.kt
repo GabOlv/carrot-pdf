@@ -397,14 +397,6 @@ private fun PdfContentArea(
                     onZoomCommitted = onZoomCommitted
                 )
 
-                PdfPageChip(
-                    currentPage = viewerState.currentPageIndex + 1,
-                    pageCount = viewerState.pageCount.coerceAtLeast(1),
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 18.dp)
-                )
-
                 ReaderZoomBubble(
                     zoom = viewerState.zoom,
                     modifier = Modifier
@@ -413,43 +405,6 @@ private fun PdfContentArea(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun PdfPageChip(
-    currentPage: Int,
-    pageCount: Int,
-    modifier: Modifier = Modifier
-) {
-    var isVisible by remember { mutableStateOf(true) }
-
-    LaunchedEffect(currentPage, pageCount) {
-        isVisible = true
-        delay(PAGE_CHIP_VISIBLE_MS)
-        isVisible = false
-    }
-
-    val chipAlpha by animateFloatAsState(
-        targetValue = if (isVisible) 0.82f else 0f,
-        animationSpec = tween(durationMillis = 220),
-        label = "page-chip-alpha"
-    )
-
-    if (chipAlpha > 0.01f) {
-        Text(
-            text = "$currentPage / $pageCount",
-            color = CarrotColors.TextPrimary,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = modifier
-                .alpha(chipAlpha)
-                .background(
-                    color = CarrotColors.Surface,
-                    shape = RoundedCornerShape(18.dp)
-                )
-                .padding(horizontal = 12.dp, vertical = 7.dp)
-        )
     }
 }
 
@@ -897,5 +852,4 @@ private fun getPdfTitle(
         ?: "Document.pdf"
 }
 
-private const val PAGE_CHIP_VISIBLE_MS = 1200L
 private const val ZOOM_CHIP_VISIBLE_MS = 1200L
