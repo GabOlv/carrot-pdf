@@ -111,18 +111,17 @@ private fun CarrotPdfContent() {
 
     ImmersiveSystemBars(isChromeVisible)
 
-    fun hideChromeForReading() {
-        if (!isSearchVisible) {
-            isChromeVisible = false
-        }
-    }
-
     fun closeSearch() {
         isSearchVisible = false
         searchQuery = ""
         searchResults.clear()
         activeSearchResultIndex = -1
         isSearching = false
+    }
+
+    fun hideChromeForReading() {
+        closeSearch()
+        isChromeVisible = false
     }
 
     fun openTab(uri: Uri, title: String) {
@@ -1027,27 +1026,33 @@ private fun ImmersiveSystemBars(
     val view = LocalView.current
     val activity = view.context.findActivity()
 
-    DisposableEffect(activity, isChromeVisible) {
+    DisposableEffect(activity) {
         val window = activity?.window
 
         if (window != null) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
-
-            val controller = WindowInsetsControllerCompat(window, view)
-            controller.systemBarsBehavior =
+            WindowInsetsControllerCompat(window, view).systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-
-            if (isChromeVisible) {
-                controller.show(WindowInsetsCompat.Type.systemBars())
-            } else {
-                controller.hide(WindowInsetsCompat.Type.systemBars())
-            }
         }
 
         onDispose {
             if (window != null) {
                 WindowInsetsControllerCompat(window, view)
                     .show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    LaunchedEffect(activity, isChromeVisible) {
+        val window = activity?.window
+
+        if (window != null) {
+            val controller = WindowInsetsControllerCompat(window, view)
+
+            if (isChromeVisible) {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.hide(WindowInsetsCompat.Type.systemBars())
             }
         }
     }

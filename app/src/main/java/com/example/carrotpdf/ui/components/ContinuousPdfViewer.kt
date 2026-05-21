@@ -59,6 +59,7 @@ import com.example.carrotpdf.ui.viewer.render.PdfRenderScheduler
 import com.example.carrotpdf.ui.viewer.render.PdfRenderSchedulerState
 import com.example.carrotpdf.ui.viewer.render.buildRenderKey
 import com.example.carrotpdf.ui.viewer.render.rememberPdfRenderScheduler
+import com.example.carrotpdf.ui.viewer.state.PdfInteractionMode
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.viewport.PdfViewport
 import kotlinx.coroutines.delay
@@ -127,13 +128,19 @@ fun ContinuousPdfViewer(
         )
 
         LaunchedEffect(listState.isScrollInProgress) {
-            if (listState.isScrollInProgress) {
+            if (
+                listState.isScrollInProgress &&
+                viewerState.interactionMode != PdfInteractionMode.ProgrammaticScroll
+            ) {
                 onUserInteraction()
             }
         }
 
         LaunchedEffect(viewerState.interactionMode) {
-            if (viewerState.interactionMode != com.example.carrotpdf.ui.viewer.state.PdfInteractionMode.Idle) {
+            if (
+                viewerState.interactionMode != PdfInteractionMode.Idle &&
+                viewerState.interactionMode != PdfInteractionMode.ProgrammaticScroll
+            ) {
                 onUserInteraction()
             }
         }
