@@ -702,6 +702,7 @@ private fun BoxScope.DrivePageIndicator(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+
     var isDragging by remember { mutableStateOf(false) }
     var thumbCenterY by remember { mutableFloatStateOf(0f) }
     var isVisible by remember { mutableStateOf(false) }
@@ -730,9 +731,18 @@ private fun BoxScope.DrivePageIndicator(
                 .padding(top = 24.dp, end = 10.dp, bottom = 24.dp)
         ) {
             val heightPx = with(density) { maxHeight.toPx() }
-            val handleHalfHeightPx = with(density) { 18.dp.toPx() }
-            val travelHeightPx = (heightPx - (handleHalfHeightPx * 2f)).coerceAtLeast(1f)
-            val targetCenterY = (handleHalfHeightPx + (travelHeightPx * scrollProgress.coerceIn(0f, 1f))).coerceIn(
+
+            val handleVisualWidth = 7.dp
+            val handleVisualHeight = 44.dp
+            val handleHitWidth = 34.dp
+            val handleHalfHeightPx = with(density) { handleVisualHeight.toPx() / 2f }
+            val travelHeightPx = (heightPx - (handleHalfHeightPx * 2f))
+                .coerceAtLeast(1f)
+
+            val targetCenterY = (
+                handleHalfHeightPx +
+                    (travelHeightPx * scrollProgress.coerceIn(0f, 1f))
+            ).coerceIn(
                 handleHalfHeightPx,
                 heightPx - handleHalfHeightPx
             )
@@ -748,6 +758,7 @@ private fun BoxScope.DrivePageIndicator(
                     handleHalfHeightPx,
                     heightPx - handleHalfHeightPx
                 )
+
                 thumbCenterY = clampedY
 
                 val targetProgress = if (heightPx <= 0f) {
@@ -760,9 +771,14 @@ private fun BoxScope.DrivePageIndicator(
                 onScrollToProgress(targetProgress)
             }
 
+            // Gesture layer restricted to the scrollbar side only.
+            // It does not cover the page number text, but it is large enough
+            // to grab comfortably on mobile.
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .align(Alignment.TopEnd)
+                    .fillMaxHeight()
+                    .width(handleHitWidth)
                     .pointerInput(heightPx) {
                         awaitPointerEventScope {
                             while (true) {
@@ -795,7 +811,11 @@ private fun BoxScope.DrivePageIndicator(
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .offset(y = with(density) { (thumbCenterY - handleHalfHeightPx).toDp() }),
+                    .offset(
+                        y = with(density) {
+                            (thumbCenterY - handleHalfHeightPx).toDp()
+                        }
+                    ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -814,10 +834,10 @@ private fun BoxScope.DrivePageIndicator(
                 Box(
                     modifier = Modifier
                         .padding(start = 8.dp)
-                        .size(width = 5.dp, height = 36.dp)
+                        .size(width = handleVisualWidth, height = handleVisualHeight)
                         .background(
                             color = CarrotColors.Accent,
-                            shape = RoundedCornerShape(4.dp)
+                            shape = RoundedCornerShape(999.dp)
                         )
                 )
             }
