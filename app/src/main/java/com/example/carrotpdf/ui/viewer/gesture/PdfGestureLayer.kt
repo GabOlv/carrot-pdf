@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
@@ -76,24 +75,13 @@ private suspend fun PointerInputScope.detectViewerTransformGestures(
             } else if (pressedPointers == 1 && viewerState.canPanContent()) {
                 val pan = event.calculatePan()
 
-                if (abs(pan.x) > abs(pan.y) && abs(pan.x) > MIN_PAN_DELTA) {
+                if (pan.getDistance() > MIN_PAN_DELTA) {
                     if (!isPanning) {
                         isPanning = true
                         viewerState.beginPan()
                     }
 
-                    val consumed = viewerState.updatePan(
-                        delta = Offset(
-                            x = pan.x,
-                            y = 0f
-                        )
-                    )
-
-                    if (consumed) {
-                        event.changes.forEach { pointerChange ->
-                            pointerChange.consume()
-                        }
-                    }
+                    viewerState.updatePan(delta = pan)
                 }
             }
         } while (event.changes.any { it.pressed })

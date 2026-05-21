@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
@@ -26,6 +27,7 @@ fun PdfViewport(
 ) {
     Box(
         modifier = modifier
+            .clipToBounds()
             .background(CarrotColors.PdfCanvas)
             .onSizeChanged(viewportState::updateViewportSize)
     ) {

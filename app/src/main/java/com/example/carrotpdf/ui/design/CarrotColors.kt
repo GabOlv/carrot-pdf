@@ -20,30 +20,30 @@ data class CarrotPalette(
 )
 
 private val DarkCarrotPalette = CarrotPalette(
-    background = Color(0xFF10151B),
-    surface = Color(0xFF171D25),
-    surfaceAlt = Color(0xFF202832),
-    surfaceSoft = Color(0xFF26303B),
-    textPrimary = Color(0xFFF4F1EA),
-    textSecondary = Color(0xFFBAC1CC),
-    textMuted = Color(0xFF79828E),
-    accent = Color(0xFFFF9F43),
-    accentSoft = Color(0x33FF9F43),
-    pdfCanvas = Color(0xFF121820),
+    background = Color(0xFF0D1116),
+    surface = Color(0xFF151A20),
+    surfaceAlt = Color(0xFF1E252D),
+    surfaceSoft = Color(0xFF2A323B),
+    textPrimary = Color(0xFFF5F3EF),
+    textSecondary = Color(0xFFC8CDD4),
+    textMuted = Color(0xFF808993),
+    accent = Color(0xFFFF7A1A),
+    accentSoft = Color(0x33FF7A1A),
+    pdfCanvas = Color(0xFF11161C),
     pageShadow = Color(0x66000000)
 )
 
 private val LightCarrotPalette = CarrotPalette(
-    background = Color(0xFFF6F3EF),
+    background = Color(0xFFFFFFFF),
     surface = Color(0xFFFFFFFF),
-    surfaceAlt = Color(0xFFEDE9E3),
-    surfaceSoft = Color(0xFFE4DED6),
-    textPrimary = Color(0xFF202124),
-    textSecondary = Color(0xFF5F6368),
-    textMuted = Color(0xFF8A8F98),
-    accent = Color(0xFFE87922),
-    accentSoft = Color(0x22E87922),
-    pdfCanvas = Color(0xFFEAE6DF),
+    surfaceAlt = Color(0xFFF2F3F5),
+    surfaceSoft = Color(0xFFE4E6EA),
+    textPrimary = Color(0xFF171A1F),
+    textSecondary = Color(0xFF4E5661),
+    textMuted = Color(0xFF8C949F),
+    accent = Color(0xFFFF7A1A),
+    accentSoft = Color(0x22FF7A1A),
+    pdfCanvas = Color(0xFFF1F2F4),
     pageShadow = Color(0x22000000)
 )
 

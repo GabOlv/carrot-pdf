@@ -5,30 +5,37 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.pdf.getPdfPageCount
-import com.example.carrotpdf.ui.components.AppDrawer
-import com.example.carrotpdf.ui.components.AppTopBar
 import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.EmptyState
 import com.example.carrotpdf.ui.components.PdfReaderControls
@@ -38,12 +45,13 @@ import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @Composable
 fun CarrotPdfApp() {
-    var isDarkTheme by remember { mutableStateOf(true) }
+    val systemDarkTheme = isSystemInDarkTheme()
+    var isDarkTheme by remember { mutableStateOf(systemDarkTheme) }
 
     CarrotDesignTheme(
         darkTheme = isDarkTheme
@@ -63,11 +71,11 @@ private fun CarrotPdfContent(
     onToggleTheme: () -> Unit
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val tabs = remember { mutableStateListOf<PdfTab>() }
     var activeTabId by remember { mutableStateOf<String?>(null) }
+    var isFullscreenReader by remember { mutableStateOf(false) }
+    var isSettingsModalOpen by remember { mutableStateOf(false) }
 
     var isLoadingDocument by remember { mutableStateOf(false) }
 
@@ -94,6 +102,7 @@ private fun CarrotPdfContent(
 
                 tabs.add(newTab)
                 activeTabId = newTab.id
+                isFullscreenReader = false
             }
         }
     )
@@ -122,75 +131,38 @@ private fun CarrotPdfContent(
         }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            AppDrawer(
-                isDarkTheme = isDarkTheme,
-                onToggleTheme = onToggleTheme,
-                onOpenPdf = {
-                    coroutineScope.launch {
-                        drawerState.close()
-                    }
-
-                    openPdf()
-                }
-            )
-        }
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = CarrotColors.Background
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = CarrotColors.Background
+        Box(
+            modifier = Modifier.fillMaxSize()
         ) {
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-                AppTopBar(
-                    onMenuClick = {
-                        coroutineScope.launch {
-                            drawerState.open()
-                        }
-                    }
-                )
+                if (!isFullscreenReader) {
+                    PdfTabStrip(
+                        tabs = tabs,
+                        activeTabId = activeTabId,
+                        onSelectTab = { id ->
+                            activeTabId = id
+                        },
+                        onCloseTab = { id ->
+                            val indexToRemove = tabs.indexOfFirst { it.id == id }
 
-                PdfTabStrip(
-                    tabs = tabs,
-                    activeTabId = activeTabId,
-                    onSelectTab = { id ->
-                        activeTabId = id
-                    },
-                    onCloseTab = { id ->
-                        val indexToRemove = tabs.indexOfFirst { it.id == id }
+                            if (indexToRemove >= 0) {
+                                tabs.removeAt(indexToRemove)
 
-                        if (indexToRemove >= 0) {
-                            tabs.removeAt(indexToRemove)
-
-                            if (activeTabId == id) {
-                                activeTabId = tabs.getOrNull(indexToRemove)?.id
-                                    ?: tabs.getOrNull(indexToRemove - 1)?.id
+                                if (activeTabId == id) {
+                                    activeTabId = tabs.getOrNull(indexToRemove)?.id
+                                        ?: tabs.getOrNull(indexToRemove - 1)?.id
+                                }
                             }
-                        }
-                    },
-                    onOpenPdf = openPdf
-                )
-
-                PdfReaderControls(
-                    activeTab = activeTab,
-                    viewerState = activeViewerState,
-                    onZoomClick = {
-                        if (activeViewerState != null) {
-                            val nextZoom = activeViewerState.advanceZoomPreset()
-                            activeViewerState.refineRenderQualityIfNeeded()
-
-                            updateActiveTab(tabs, activeTabId) { tab ->
-                                tab.copy(zoom = nextZoom)
-                            }
-                        }
-                    },
-                    onLayoutClick = {
-                        // Future: thumbnails, split view, page grid, or window view.
-                    }
-                )
+                        },
+                        onOpenPdf = openPdf
+                    )
+                }
 
                 PdfContentArea(
                     activeTab = activeTab,
@@ -214,6 +186,56 @@ private fun CarrotPdfContent(
                                 tab.copy(zoom = zoom)
                             }
                         }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (!isFullscreenReader) {
+                    PdfReaderControls(
+                        activeTab = activeTab,
+                        viewerState = activeViewerState,
+                        onBookmarkClick = {},
+                        onExpandClick = {
+                            isFullscreenReader = true
+                        },
+                        onEditClick = {},
+                        onSearchClick = {},
+                        onConfigClick = {
+                            isSettingsModalOpen = true
+                        }
+                    )
+                }
+            }
+
+            if (isFullscreenReader) {
+                Text(
+                    text = "Exit",
+                    color = CarrotColors.TextPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(18.dp)
+                        .background(
+                            color = CarrotColors.Surface.copy(alpha = 0.94f),
+                            shape = RoundedCornerShape(22.dp)
+                        )
+                        .clickable {
+                            isFullscreenReader = false
+                        }
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                )
+            }
+
+            if (isSettingsModalOpen) {
+                ReaderSettingsModal(
+                    isDarkTheme = isDarkTheme,
+                    onToggleTheme = onToggleTheme,
+                    onOpenPdf = {
+                        isSettingsModalOpen = false
+                        openPdf()
+                    },
+                    onDismiss = {
+                        isSettingsModalOpen = false
                     }
                 )
             }
@@ -228,11 +250,13 @@ private fun PdfContentArea(
     isLoadingDocument: Boolean,
     onOpenPdf: () -> Unit,
     onCurrentPageChange: (Int) -> Unit,
-    onZoomCommitted: (Float) -> Unit
+    onZoomCommitted: (Float) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
+            .clipToBounds()
             .background(CarrotColors.PdfCanvas),
         contentAlignment = Alignment.Center
     ) {
@@ -255,9 +279,161 @@ private fun PdfContentArea(
                     onCurrentPageChange = onCurrentPageChange,
                     onZoomCommitted = onZoomCommitted
                 )
+
+                PdfPageChip(
+                    currentPage = viewerState.currentPageIndex + 1,
+                    pageCount = viewerState.pageCount.coerceAtLeast(1),
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 18.dp)
+                )
+
+                ReaderZoomBubble(
+                    zoom = viewerState.zoom,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 20.dp, bottom = 18.dp)
+                )
             }
         }
     }
+}
+
+@Composable
+private fun PdfPageChip(
+    currentPage: Int,
+    pageCount: Int,
+    modifier: Modifier = Modifier
+) {
+    var isVisible by remember { mutableStateOf(true) }
+
+    LaunchedEffect(currentPage, pageCount) {
+        isVisible = true
+        delay(PAGE_CHIP_VISIBLE_MS)
+        isVisible = false
+    }
+
+    val chipAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 0.82f else 0f,
+        animationSpec = tween(durationMillis = 220),
+        label = "page-chip-alpha"
+    )
+
+    if (chipAlpha > 0.01f) {
+        Text(
+            text = "$currentPage / $pageCount",
+            color = CarrotColors.TextPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = modifier
+                .alpha(chipAlpha)
+                .background(
+                    color = CarrotColors.Surface,
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+        )
+    }
+}
+
+@Composable
+private fun ReaderZoomBubble(
+    zoom: Float,
+    modifier: Modifier = Modifier
+) {
+    var isVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(zoom) {
+        isVisible = true
+        delay(ZOOM_CHIP_VISIBLE_MS)
+        isVisible = false
+    }
+
+    val chipAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 0.82f else 0f,
+        animationSpec = tween(durationMillis = 220),
+        label = "zoom-chip-alpha"
+    )
+
+    if (chipAlpha > 0.01f) {
+        Text(
+            text = "${(zoom * 100).toInt()}%",
+            color = CarrotColors.TextPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = modifier
+                .alpha(chipAlpha)
+                .background(
+                    color = CarrotColors.Surface,
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun ReaderSettingsModal(
+    isDarkTheme: Boolean,
+    onToggleTheme: () -> Unit,
+    onOpenPdf: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Carrot PDF",
+                color = CarrotColors.TextPrimary
+            )
+        },
+        text = {
+            Column {
+                SettingsModalItem(
+                    text = "Open PDF",
+                    onClick = onOpenPdf
+                )
+                SettingsModalItem(
+                    text = "Recent Items",
+                    onClick = {}
+                )
+                SettingsModalItem(
+                    text = "Bookmarked",
+                    onClick = {}
+                )
+                SettingsModalItem(
+                    text = if (isDarkTheme) "Switch to Light Theme" else "Switch to Dark Theme",
+                    onClick = onToggleTheme
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss
+            ) {
+                Text(
+                    text = "Close",
+                    color = CarrotColors.Accent
+                )
+            }
+        },
+        containerColor = CarrotColors.Surface
+    )
+}
+
+@Composable
+private fun SettingsModalItem(
+    text: String,
+    onClick: () -> Unit
+) {
+    Text(
+        text = text,
+        color = CarrotColors.TextPrimary,
+        style = MaterialTheme.typography.bodyLarge,
+        modifier = Modifier
+            .clickable { onClick() }
+            .padding(vertical = 12.dp)
+    )
 }
 
 @Composable
@@ -320,3 +496,6 @@ private fun getPdfTitle(
         ?.takeIf { it.isNotBlank() }
         ?: "Document.pdf"
 }
+
+private const val PAGE_CHIP_VISIBLE_MS = 1200L
+private const val ZOOM_CHIP_VISIBLE_MS = 1200L

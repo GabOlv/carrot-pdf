@@ -99,6 +99,7 @@ fun ContinuousPdfViewer(
             documentId = viewerState.documentId,
             visiblePages = virtualizerState.visiblePages,
             renderQualityScale = viewerState.renderQualityScale,
+            isEnabled = viewerState.canRunRenderScheduler,
             onRenderQualityDisplayed = viewerState::markRenderQualityDisplayed
         )
 

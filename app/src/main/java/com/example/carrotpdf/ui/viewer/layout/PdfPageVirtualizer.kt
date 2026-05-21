@@ -11,6 +11,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import com.example.carrotpdf.ui.viewer.state.PdfVisiblePages
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.math.max
+import kotlin.math.min
 
 @Stable
 class PdfPageVirtualizerState(
@@ -21,6 +23,7 @@ class PdfPageVirtualizerState(
 
     fun updateVisibleIndexes(
         visibleIndexes: List<Int>,
+        primaryVisiblePage: Int?,
         pageCount: Int
     ): PdfVisiblePages {
         val firstVisiblePage = visibleIndexes.minOrNull()
@@ -38,7 +41,8 @@ class PdfPageVirtualizerState(
 
             PdfVisiblePages(
                 visibleRange = firstVisiblePage..lastVisiblePage,
-                activeRange = activeFirstPage..activeLastPage
+                activeRange = activeFirstPage..activeLastPage,
+                primaryVisiblePage = primaryVisiblePage
             )
         }
 
@@ -65,14 +69,29 @@ fun rememberPdfPageVirtualizer(
         virtualizerState
     ) {
         snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo
-                .map { item -> item.index }
-                .filter { pageIndex -> pageIndex in 0 until pageCount }
+            val layoutInfo = listState.layoutInfo
+            val viewportStart = layoutInfo.viewportStartOffset
+            val viewportEnd = layoutInfo.viewportEndOffset
+            val visibleItems = layoutInfo.visibleItemsInfo
+                .filter { item -> item.index in 0 until pageCount }
+            val primaryVisiblePage = visibleItems
+                .maxByOrNull { item ->
+                    val itemStart = item.offset
+                    val itemEnd = item.offset + item.size
+                    val visibleStart = max(itemStart, viewportStart)
+                    val visibleEnd = min(itemEnd, viewportEnd)
+
+                    (visibleEnd - visibleStart).coerceAtLeast(0)
+                }
+                ?.index
+
+            visibleItems.map { item -> item.index } to primaryVisiblePage
         }
             .distinctUntilChanged()
-            .collect { visibleIndexes ->
+            .collect { (visibleIndexes, primaryVisiblePage) ->
                 val visiblePages = virtualizerState.updateVisibleIndexes(
                     visibleIndexes = visibleIndexes,
+                    primaryVisiblePage = primaryVisiblePage,
                     pageCount = pageCount
                 )
 

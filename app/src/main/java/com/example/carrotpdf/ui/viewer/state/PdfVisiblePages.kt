@@ -5,10 +5,11 @@ import androidx.compose.runtime.Immutable
 @Immutable
 data class PdfVisiblePages(
     val visibleRange: IntRange?,
-    val activeRange: IntRange?
+    val activeRange: IntRange?,
+    val primaryVisiblePage: Int? = visibleRange?.first
 ) {
     val firstVisiblePage: Int?
-        get() = visibleRange?.first
+        get() = primaryVisiblePage ?: visibleRange?.first
 
     fun isActive(pageIndex: Int): Boolean {
         return activeRange?.contains(pageIndex) == true
@@ -17,7 +18,8 @@ data class PdfVisiblePages(
     companion object {
         val Empty = PdfVisiblePages(
             visibleRange = null,
-            activeRange = null
+            activeRange = null,
+            primaryVisiblePage = null
         )
     }
 }

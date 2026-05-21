@@ -50,6 +50,11 @@ class PdfViewerState(
     val canUpdateCurrentPageFromScroll: Boolean
         get() = interactionMode == PdfInteractionMode.Idle
 
+    val canRunRenderScheduler: Boolean
+        get() = interactionMode != PdfInteractionMode.Zooming &&
+            interactionMode != PdfInteractionMode.Panning &&
+            interactionMode != PdfInteractionMode.Settling
+
     fun updatePageCount(pageCount: Int) {
         this.pageCount = pageCount.coerceAtLeast(0)
         currentPageIndex = coercePageIndex(currentPageIndex)

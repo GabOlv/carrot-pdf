@@ -165,20 +165,20 @@ class PdfViewportState(
         val scaledContentWidth = contentSize.width * scale
         val scaledContentHeight = contentSize.height * scale
 
-        val minX = if (scaledContentWidth > viewportWidth) {
-            viewportWidth - scaledContentWidth
-        } else {
-            0f
-        }
-
         val minY = if (scaledContentHeight > viewportHeight) {
             viewportHeight - scaledContentHeight
         } else {
             0f
         }
 
+        val coercedX = if (scaledContentWidth > viewportWidth) {
+            offset.x.coerceIn(viewportWidth - scaledContentWidth, 0f)
+        } else {
+            (viewportWidth - scaledContentWidth) / 2f
+        }
+
         return Offset(
-            x = offset.x.coerceIn(minX, 0f),
+            x = coercedX,
             y = offset.y.coerceIn(minY, 0f)
         )
     }

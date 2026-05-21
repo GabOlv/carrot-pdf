@@ -133,6 +133,7 @@ fun PdfRenderScheduler(
     documentId: String,
     visiblePages: PdfVisiblePages,
     renderQualityScale: Float,
+    isEnabled: Boolean = true,
     onRenderQualityDisplayed: () -> Unit = {}
 ) {
     val scaleBucketPercent = pdfRenderScaleBucketPercent(renderQualityScale)
@@ -147,11 +148,17 @@ fun PdfRenderScheduler(
         schedulerState,
         documentId,
         visiblePages,
-        scaleBucketPercent
+        scaleBucketPercent,
+        isEnabled
     ) {
+        if (!isEnabled) {
+            return@LaunchedEffect
+        }
+
         val requests = buildRenderRequests(
             documentId = documentId,
             visiblePages = visiblePages,
+            renderQualityScale = renderQualityScale,
             scaleBucketPercent = scaleBucketPercent
         )
 
@@ -177,10 +184,15 @@ fun buildRenderKey(
 private fun buildRenderRequests(
     documentId: String,
     visiblePages: PdfVisiblePages,
+    renderQualityScale: Float,
     scaleBucketPercent: Int
 ): List<PdfRenderRequest> {
-    val activeRange = visiblePages.activeRange ?: return emptyList()
     val visibleRange = visiblePages.visibleRange
+    val activeRange = if (renderQualityScale > VISIBLE_ONLY_RENDER_SCALE) {
+        visibleRange
+    } else {
+        visiblePages.activeRange
+    } ?: return emptyList()
 
     return activeRange
         .map { pageIndex ->
@@ -205,3 +217,5 @@ private fun buildRenderRequests(
                 }
         )
 }
+
+private const val VISIBLE_ONLY_RENDER_SCALE = 1.15f
