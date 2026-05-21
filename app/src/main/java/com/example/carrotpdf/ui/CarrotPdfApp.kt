@@ -58,6 +58,7 @@ import com.example.carrotpdf.data.CarrotLibraryStore
 import com.example.carrotpdf.model.PdfBookmark
 import com.example.carrotpdf.model.PdfCategory
 import com.example.carrotpdf.model.PdfOpenTab
+import com.example.carrotpdf.model.PdfRecentFile
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
@@ -154,6 +155,11 @@ private fun CarrotPdfContent(
             addAll(initialLibrary.openTabs.map { tab -> tab.tabId })
         }
     }
+    val recentFiles = remember {
+        mutableStateListOf<PdfRecentFile>().apply {
+            addAll(initialLibrary.recentFiles)
+        }
+    }
 
     var activeTabId by remember { mutableStateOf(tabs.firstOrNull()?.id) }
     var selectedCategoryId by remember {
@@ -165,6 +171,7 @@ private fun CarrotPdfContent(
     }
     var isFullscreenReader by remember { mutableStateOf(false) }
     var isSettingsModalOpen by remember { mutableStateOf(false) }
+    var isRecentFilesModalOpen by remember { mutableStateOf(false) }
     var isCategoriesModalOpen by remember { mutableStateOf(false) }
     var isSearchModalOpen by remember { mutableStateOf(false) }
     var categoryNameInput by remember { mutableStateOf("") }
@@ -218,8 +225,46 @@ private fun CarrotPdfContent(
             categories = categories,
             bookmarks = bookmarks,
             openTabs = openTabs,
+            recentFiles = recentFiles,
             selectedCategoryId = selectedCategoryId
         )
+    }
+
+    fun rememberRecentFile(uri: Uri, title: String) {
+        recentFiles.removeAll { it.uri == uri.toString() }
+        recentFiles.add(
+            0,
+            PdfRecentFile(
+                uri = uri.toString(),
+                title = title,
+                openedAtMillis = System.currentTimeMillis()
+            )
+        )
+
+        while (recentFiles.size > MAX_RECENT_FILES) {
+            recentFiles.removeAt(recentFiles.lastIndex)
+        }
+    }
+
+    fun openLibraryTab(uri: Uri, title: String) {
+        val existingTab = tabs.firstOrNull { it.uri == uri }
+
+        if (existingTab != null) {
+            activeTabId = existingTab.id
+        } else {
+            val newTab = PdfTab(
+                uri = uri,
+                title = title
+            )
+            tabs.add(newTab)
+            temporaryTabOrder.add(newTab.id)
+            activeTabId = newTab.id
+        }
+
+        selectedCategoryId = PdfCategory.DEFAULT_ID
+        rememberRecentFile(uri, title)
+        persistLibrary()
+        isFullscreenReader = false
     }
 
     val pdfPicker = rememberLauncherForActivityResult(
@@ -235,24 +280,10 @@ private fun CarrotPdfContent(
                     // Some providers may not allow persistable permission.
                 }
 
-                val newTab = PdfTab(
+                openLibraryTab(
                     uri = uri,
                     title = getPdfTitle(context, uri)
                 )
-
-                val existingTab = tabs.firstOrNull { it.uri == uri }
-
-                if (existingTab != null) {
-                    activeTabId = existingTab.id
-                } else {
-                    tabs.add(newTab)
-                    temporaryTabOrder.add(newTab.id)
-                    activeTabId = newTab.id
-                }
-
-                selectedCategoryId = PdfCategory.DEFAULT_ID
-                persistLibrary()
-                isFullscreenReader = false
             }
         }
     )
@@ -447,6 +478,10 @@ private fun CarrotPdfContent(
                         isSettingsModalOpen = false
                         openPdf()
                     },
+                    onOpenRecentFiles = {
+                        isSettingsModalOpen = false
+                        isRecentFilesModalOpen = true
+                    },
                     onSharePdf = {
                         val tab = activeTab
 
@@ -475,6 +510,22 @@ private fun CarrotPdfContent(
                     },
                     onDismiss = {
                         isSettingsModalOpen = false
+                    }
+                )
+            }
+
+            if (isRecentFilesModalOpen) {
+                RecentFilesModal(
+                    recentFiles = recentFiles,
+                    onOpenRecentFile = { recentFile ->
+                        openLibraryTab(
+                            uri = Uri.parse(recentFile.uri),
+                            title = recentFile.title
+                        )
+                        isRecentFilesModalOpen = false
+                    },
+                    onDismiss = {
+                        isRecentFilesModalOpen = false
                     }
                 )
             }
@@ -705,6 +756,7 @@ private fun ReaderZoomBubble(
 @Composable
 private fun ReaderSettingsModal(
     onOpenPdf: () -> Unit,
+    onOpenRecentFiles: () -> Unit,
     onSharePdf: () -> Unit,
     onDownloadPdf: () -> Unit,
     onPrintPdf: () -> Unit,
@@ -727,6 +779,12 @@ private fun ReaderSettingsModal(
                     title = "Open PDF",
                     subtitle = "Choose a local file",
                     onClick = onOpenPdf
+                )
+                SettingsActionCard(
+                    iconResId = R.drawable.ic_action_recent,
+                    title = "Recent files",
+                    subtitle = "Reopen a document from this device",
+                    onClick = onOpenRecentFiles
                 )
                 SettingsActionCard(
                     iconResId = R.drawable.ic_action_share,
@@ -819,6 +877,57 @@ private fun SettingsActionCard(
             }
         }
     }
+}
+
+@Composable
+private fun RecentFilesModal(
+    recentFiles: List<PdfRecentFile>,
+    onOpenRecentFile: (PdfRecentFile) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Recent files",
+                color = CarrotColors.TextPrimary
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (recentFiles.isEmpty()) {
+                    Text(
+                        text = "No recent files yet.",
+                        color = CarrotColors.TextMuted,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                recentFiles.forEach { file ->
+                    SettingsActionCard(
+                        iconResId = R.drawable.ic_action_recent,
+                        title = file.title,
+                        subtitle = "Open from recent files",
+                        onClick = {
+                            onOpenRecentFile(file)
+                        }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = "Close",
+                    color = CarrotColors.Accent
+                )
+            }
+        },
+        containerColor = CarrotColors.Surface
+    )
 }
 
 @Composable
@@ -1448,3 +1557,4 @@ private fun getPdfTitle(
 }
 
 private const val ZOOM_CHIP_VISIBLE_MS = 1200L
+private const val MAX_RECENT_FILES = 24

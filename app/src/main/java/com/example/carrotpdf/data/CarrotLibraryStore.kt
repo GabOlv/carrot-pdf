@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.carrotpdf.model.PdfBookmark
 import com.example.carrotpdf.model.PdfCategory
 import com.example.carrotpdf.model.PdfOpenTab
+import com.example.carrotpdf.model.PdfRecentFile
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -11,6 +12,7 @@ data class CarrotLibrarySnapshot(
     val categories: List<PdfCategory>,
     val bookmarks: List<PdfBookmark>,
     val openTabs: List<PdfOpenTab>,
+    val recentFiles: List<PdfRecentFile>,
     val selectedCategoryId: String
 )
 
@@ -30,6 +32,7 @@ class CarrotLibraryStore(
             categories = categories.ifEmpty { listOf(PdfCategory.Default) },
             bookmarks = bookmarks,
             openTabs = loadOpenTabs(),
+            recentFiles = loadRecentFiles(),
             selectedCategoryId = preferences.getString(KEY_SELECTED_CATEGORY, PdfCategory.DEFAULT_ID)
                 ?: PdfCategory.DEFAULT_ID
         )
@@ -39,12 +42,14 @@ class CarrotLibraryStore(
         categories: List<PdfCategory>,
         bookmarks: List<PdfBookmark>,
         openTabs: List<PdfOpenTab> = emptyList(),
+        recentFiles: List<PdfRecentFile> = emptyList(),
         selectedCategoryId: String = PdfCategory.DEFAULT_ID
     ) {
         preferences.edit()
             .putString(KEY_CATEGORIES, categoriesToJson(categories).toString())
             .putString(KEY_BOOKMARKS, bookmarksToJson(bookmarks).toString())
             .putString(KEY_OPEN_TABS, openTabsToJson(openTabs).toString())
+            .putString(KEY_RECENT_FILES, recentFilesToJson(recentFiles).toString())
             .putString(KEY_SELECTED_CATEGORY, selectedCategoryId)
             .apply()
     }
@@ -117,6 +122,28 @@ class CarrotLibraryStore(
         }
     }
 
+    private fun loadRecentFiles(): List<PdfRecentFile> {
+        val raw = preferences.getString(KEY_RECENT_FILES, null) ?: return emptyList()
+        val json = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+
+        return buildList {
+            for (index in 0 until json.length()) {
+                val item = json.optJSONObject(index) ?: continue
+                val uri = item.optString("uri").takeIf { it.isNotBlank() } ?: continue
+                val title = item.optString("title").takeIf { it.isNotBlank() } ?: continue
+                val openedAtMillis = item.optLong("openedAtMillis", 0L)
+
+                add(
+                    PdfRecentFile(
+                        uri = uri,
+                        title = title,
+                        openedAtMillis = openedAtMillis
+                    )
+                )
+            }
+        }.sortedByDescending { it.openedAtMillis }
+    }
+
     private fun categoriesToJson(categories: List<PdfCategory>): JSONArray {
         return JSONArray().apply {
             categories.forEach { category ->
@@ -156,11 +183,25 @@ class CarrotLibraryStore(
         }
     }
 
+    private fun recentFilesToJson(recentFiles: List<PdfRecentFile>): JSONArray {
+        return JSONArray().apply {
+            recentFiles.forEach { file ->
+                put(
+                    JSONObject()
+                        .put("uri", file.uri)
+                        .put("title", file.title)
+                        .put("openedAtMillis", file.openedAtMillis)
+                )
+            }
+        }
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "carrot_library"
         const val KEY_CATEGORIES = "categories"
         const val KEY_BOOKMARKS = "bookmarks"
         const val KEY_OPEN_TABS = "open_tabs"
+        const val KEY_RECENT_FILES = "recent_files"
         const val KEY_SELECTED_CATEGORY = "selected_category_id"
     }
 }
