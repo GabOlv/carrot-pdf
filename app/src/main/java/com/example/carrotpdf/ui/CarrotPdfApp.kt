@@ -17,6 +17,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +64,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -69,7 +72,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -140,6 +142,12 @@ private fun CarrotPdfContent() {
 
         if (existingTab != null) {
             activeTabId = existingTab.id
+            updateActiveTab(tabs, existingTab.id) { tab ->
+                tab.copy(
+                    currentPageIndex = 0,
+                    zoom = 1f
+                )
+            }
         } else {
             val tab = PdfTab(uri = uri, title = title)
             tabs.add(tab)
@@ -276,12 +284,13 @@ private fun CarrotPdfContent() {
                 searchResults = searchResults,
                 activeSearchResultIndex = activeSearchResultIndex,
                 pageSizes = activeTab?.pageSizes.orEmpty(),
-                pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, onScrollToPage ->
+                pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                     DrivePageIndicator(
                         currentPage = currentPage,
                         pageCount = pageCount,
                         isScrollInProgress = isScrollInProgress,
-                        onScrollToPage = onScrollToPage,
+                        scrollProgress = scrollProgress,
+                        onScrollToProgress = onScrollToProgress,
                         modifier = Modifier.align(Alignment.CenterEnd)
                     )
                 },
@@ -491,7 +500,8 @@ private fun ReaderStage(
         currentPage: Int,
         pageCount: Int,
         isScrollInProgress: Boolean,
-        onScrollToPage: (Int) -> Unit
+        scrollProgress: Float,
+        onScrollToProgress: (Float) -> Unit
     ) -> Unit,
     onOpenPdf: () -> Unit,
     onToggleChrome: () -> Unit,
@@ -535,12 +545,13 @@ private fun ReaderStage(
                     activeSearchResultIndex = activeSearchResultIndex,
                     pageSizes = pageSizes,
                     onUserInteraction = onUserInteraction,
-                    pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, onScrollToPage ->
+                    pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                         pageIndicatorContent(
                             currentPage,
                             pageCount,
                             isScrollInProgress,
-                            onScrollToPage
+                            scrollProgress,
+                            onScrollToProgress
                         )
                     }
                 )
@@ -686,7 +697,8 @@ private fun BoxScope.DrivePageIndicator(
     currentPage: Int,
     pageCount: Int,
     isScrollInProgress: Boolean,
-    onScrollToPage: (Int) -> Unit,
+    scrollProgress: Float,
+    onScrollToProgress: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -694,7 +706,7 @@ private fun BoxScope.DrivePageIndicator(
     var thumbCenterY by remember { mutableFloatStateOf(0f) }
     var isVisible by remember { mutableStateOf(false) }
 
-    LaunchedEffect(currentPage, pageCount, isScrollInProgress, isDragging) {
+    LaunchedEffect(currentPage, pageCount, isScrollInProgress, isDragging, scrollProgress) {
         if (isScrollInProgress || isDragging) {
             isVisible = true
             return@LaunchedEffect
@@ -713,18 +725,14 @@ private fun BoxScope.DrivePageIndicator(
     ) {
         BoxWithConstraints(
             modifier = Modifier
-                .heightIn(min = 220.dp)
+                .fillMaxHeight()
                 .width(100.dp)
-                .padding(end = 10.dp)
+                .padding(top = 24.dp, end = 10.dp, bottom = 24.dp)
         ) {
             val heightPx = with(density) { maxHeight.toPx() }
-            val handleHalfHeightPx = with(density) { 22.dp.toPx() }
-            val pageFraction = if (pageCount <= 1) {
-                0f
-            } else {
-                (currentPage - 1).toFloat() / (pageCount - 1)
-            }
-            val targetCenterY = (heightPx * pageFraction).coerceIn(
+            val handleHalfHeightPx = with(density) { 18.dp.toPx() }
+            val travelHeightPx = (heightPx - (handleHalfHeightPx * 2f)).coerceAtLeast(1f)
+            val targetCenterY = (handleHalfHeightPx + (travelHeightPx * scrollProgress.coerceIn(0f, 1f))).coerceIn(
                 handleHalfHeightPx,
                 heightPx - handleHalfHeightPx
             )
@@ -742,38 +750,52 @@ private fun BoxScope.DrivePageIndicator(
                 )
                 thumbCenterY = clampedY
 
-                val targetPage = if (heightPx <= 0f || pageCount <= 1) {
-                    0
+                val targetProgress = if (heightPx <= 0f) {
+                    0f
                 } else {
-                    ((clampedY / heightPx) * (pageCount - 1))
-                        .roundToInt()
-                        .coerceIn(0, pageCount - 1)
+                    ((clampedY - handleHalfHeightPx) / travelHeightPx)
+                        .coerceIn(0f, 1f)
                 }
 
-                onScrollToPage(targetPage)
+                onScrollToProgress(targetProgress)
             }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(heightPx) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown(
+                                    requireUnconsumed = false,
+                                    pass = PointerEventPass.Initial
+                                )
+
+                                isDragging = true
+                                scrollToThumbPosition(down.position.y)
+                                down.consume()
+
+                                do {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+
+                                    event.changes.forEach { change ->
+                                        if (change.pressed) {
+                                            scrollToThumbPosition(change.position.y)
+                                            change.consume()
+                                        }
+                                    }
+                                } while (event.changes.any { change -> change.pressed })
+
+                                isDragging = false
+                            }
+                        }
+                    }
+            )
 
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .offset(y = with(density) { (thumbCenterY - handleHalfHeightPx).toDp() })
-                    .pointerInput(pageCount, heightPx) {
-                        detectVerticalDragGestures(
-                            onDragStart = {
-                                isDragging = true
-                            },
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                scrollToThumbPosition(thumbCenterY + dragAmount)
-                            },
-                            onDragEnd = {
-                                isDragging = false
-                            },
-                            onDragCancel = {
-                                isDragging = false
-                            }
-                        )
-                    },
+                    .offset(y = with(density) { (thumbCenterY - handleHalfHeightPx).toDp() }),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -792,7 +814,7 @@ private fun BoxScope.DrivePageIndicator(
                 Box(
                     modifier = Modifier
                         .padding(start = 8.dp)
-                        .size(width = 5.dp, height = 44.dp)
+                        .size(width = 5.dp, height = 36.dp)
                         .background(
                             color = CarrotColors.Accent,
                             shape = RoundedCornerShape(4.dp)

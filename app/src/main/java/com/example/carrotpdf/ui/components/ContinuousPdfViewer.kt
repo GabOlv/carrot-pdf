@@ -5,17 +5,15 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,22 +25,29 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.pdf.PdfSearchResult
+import com.example.carrotpdf.ui.viewer.debug.PdfViewerDebug
+import com.example.carrotpdf.ui.viewer.layout.buildPdfDocumentGeometry
 import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageLayout
-import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageVirtualizer
+import com.example.carrotpdf.ui.viewer.layout.visiblePagesForViewport
 import com.example.carrotpdf.ui.viewer.render.PdfPageRenderState
 import com.example.carrotpdf.ui.viewer.render.PdfRenderScheduler
 import com.example.carrotpdf.ui.viewer.render.PdfRenderSchedulerState
@@ -52,7 +57,8 @@ import com.example.carrotpdf.ui.viewer.state.PdfInteractionMode
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.viewport.PdfViewport
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.math.roundToInt
 
 @Composable
 fun ContinuousPdfViewer(
@@ -68,44 +74,54 @@ fun ContinuousPdfViewer(
         currentPage: Int,
         pageCount: Int,
         isScrollInProgress: Boolean,
-        onScrollToPage: (Int) -> Unit
-    ) -> Unit = { _, _, _, _ -> }
+        scrollProgress: Float,
+        onScrollToProgress: (Float) -> Unit
+    ) -> Unit = { _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
 
     val screenWidth = configuration.screenWidthDp.dp
     val pageLayout = rememberPdfPageLayout(
         viewportWidth = screenWidth
     )
+    val documentGeometry = remember(
+        viewerState.documentId,
+        viewerState.pageCount,
+        pageSizes,
+        pageLayout,
+        density
+    ) {
+        buildPdfDocumentGeometry(
+            pageCount = viewerState.pageCount,
+            pageSizes = pageSizes,
+            contentWidthPx = with(density) { pageLayout.contentWidth.toPx() },
+            pageWidthPx = with(density) { pageLayout.pageWidth.toPx() },
+            horizontalPaddingPx = with(density) { pageLayout.horizontalPadding.toPx() },
+            verticalPaddingPx = with(density) { pageLayout.verticalPadding.toPx() },
+            pageSpacingPx = with(density) { pageLayout.pageSpacing.toPx() }
+        )
+    }
+
+    LaunchedEffect(documentGeometry) {
+        val firstFrame = documentGeometry.pageFrames.firstOrNull()
+        val lastFrame = documentGeometry.pageFrames.lastOrNull()
+
+        PdfViewerDebug.log {
+            "documentGeometry doc=${viewerState.documentId} pages=${documentGeometry.pageCount} " +
+                "contentWidth=${documentGeometry.contentWidthPx} pageWidth=${documentGeometry.pageWidthPx} " +
+                "paddingH=${documentGeometry.horizontalPaddingPx} paddingV=${documentGeometry.verticalPaddingPx} " +
+                "spacing=${documentGeometry.pageSpacingPx} totalHeight=${documentGeometry.totalHeightPx} " +
+                "first=${firstFrame?.let { "#${it.pageIndex + 1}:${it.topPx}-${it.bottomPx} h=${it.heightPx}" }} " +
+                "last=${lastFrame?.let { "#${it.pageIndex + 1}:${it.topPx}-${it.bottomPx} h=${it.heightPx}" }}"
+        }
+    }
 
     key(viewerState.documentId) {
-        val listState = rememberLazyListState(
-            initialFirstVisibleItemIndex = viewerState.currentPageIndex.coerceIn(
-                0,
-                (viewerState.pageCount - 1).coerceAtLeast(0)
-            )
-        )
-
+        var hasInitializedScroll by remember { mutableStateOf(false) }
+        var isManualScrollInProgress by remember { mutableStateOf(false) }
         var renderRefinementRequests by remember { mutableIntStateOf(0) }
-
-        val virtualizerState = rememberPdfPageVirtualizer(
-            listState = listState,
-            pageCount = viewerState.pageCount,
-            onVisiblePagesChange = { visiblePages ->
-                viewerState.updateVisiblePages(visiblePages)
-
-                val firstVisiblePage = visiblePages.firstVisiblePage
-
-                if (
-                    viewerState.canUpdateCurrentPageFromScroll &&
-                    firstVisiblePage != null &&
-                    viewerState.updateCurrentPageIndex(firstVisiblePage)
-                ) {
-                    onCurrentPageChange(firstVisiblePage)
-                }
-            }
-        )
 
         val renderSchedulerState = rememberPdfRenderScheduler(
             context = context,
@@ -113,23 +129,179 @@ fun ContinuousPdfViewer(
             documentId = viewerState.documentId
         )
 
+        LaunchedEffect(documentGeometry) {
+            viewerState.viewportState.updateContentSize(
+                IntSize(
+                    width = documentGeometry.contentWidthPx.roundToInt().coerceAtLeast(0),
+                    height = documentGeometry.totalHeightPx.roundToInt().coerceAtLeast(0)
+                )
+            )
+        }
+
+        LaunchedEffect(documentGeometry, viewerState.documentId) {
+            if (!hasInitializedScroll) {
+                val initialPageIndex = viewerState.currentPageIndex.coerceIn(
+                    0,
+                    (viewerState.pageCount - 1).coerceAtLeast(0)
+                )
+                val initialTopPx = documentGeometry.pageFrames
+                    .getOrNull(initialPageIndex)
+                    ?.topPx
+                    ?.coerceIn(0f, documentGeometry.totalHeightPx)
+                    ?: 0f
+                viewerState.viewportState.setViewportOrigin(
+                    leftPx = 0f,
+                    topPx = initialTopPx
+                )
+                hasInitializedScroll = true
+            }
+        }
+
+        val viewportState = viewerState.viewportState
+        val scale = viewportState.visualScale.coerceAtLeast(0.001f)
+        val viewportSize = viewportState.viewportSize
+        val viewportHeightUnscaled = if (viewportSize.height > 0) {
+            viewportSize.height / scale
+        } else {
+            0f
+        }
+        val viewportWidthUnscaled = if (viewportSize.width > 0) {
+            viewportSize.width / scale
+        } else {
+            0f
+        }
+        val maxViewportTopPx = (documentGeometry.totalHeightPx - viewportHeightUnscaled)
+            .coerceAtLeast(0f)
+        val maxViewportLeftPx = (documentGeometry.contentWidthPx - viewportWidthUnscaled)
+            .coerceAtLeast(0f)
+        val viewportOrigin = viewportState.viewportOrigin()
+        val geometryViewportTop = viewportOrigin.y
+            .coerceIn(0f, maxViewportTopPx)
+        val geometryViewportBottom = geometryViewportTop + viewportHeightUnscaled
+        val geometryViewportLeft = viewportOrigin.x
+            .coerceIn(0f, maxViewportLeftPx)
+        val geometryViewportRight = geometryViewportLeft + viewportWidthUnscaled
+        val geometryVisiblePages = remember(
+            documentGeometry,
+            geometryViewportTop,
+            geometryViewportBottom
+        ) {
+            documentGeometry.visiblePagesForViewport(
+                viewportTopPx = geometryViewportTop,
+                viewportBottomPx = geometryViewportBottom
+            )
+        }
+        val pagesToCompose = geometryVisiblePages.activeRange
+            ?: documentGeometry.pageFrames
+                .firstOrNull()
+                ?.let { 0..0 }
+            ?: IntRange.EMPTY
+        val scrollProgress = if (maxViewportTopPx > 0f) {
+            (geometryViewportTop / maxViewportTopPx).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val scrollableState = rememberScrollableState { delta ->
+            val previousPanY = viewerState.viewportState.panOffset.y
+            val didPan = viewerState.viewportState.panBy(
+                androidx.compose.ui.geometry.Offset(
+                    x = 0f,
+                    y = delta
+                )
+            )
+            val consumed = viewerState.viewportState.panOffset.y - previousPanY
+
+            if (didPan && consumed != 0f) {
+                isManualScrollInProgress = true
+                onUserInteraction()
+            }
+
+            consumed
+        }
+
+        LaunchedEffect(isManualScrollInProgress, viewportState.panOffset) {
+            if (isManualScrollInProgress) {
+                delay(MANUAL_SCROLL_IDLE_DEBOUNCE_MS)
+                isManualScrollInProgress = false
+            }
+        }
+
+        LaunchedEffect(geometryVisiblePages, viewerState.interactionMode) {
+            viewerState.updateVisiblePages(geometryVisiblePages)
+
+            val firstVisiblePage = geometryVisiblePages.firstVisiblePage
+
+            if (
+                viewerState.canUpdateCurrentPageFromScroll &&
+                firstVisiblePage != null &&
+                viewerState.updateCurrentPageIndex(firstVisiblePage)
+            ) {
+                onCurrentPageChange(firstVisiblePage)
+            }
+        }
+
+        LaunchedEffect(
+            viewerState.documentId,
+            documentGeometry,
+            viewportState.visualScale,
+            viewportState.panOffset,
+            viewportState.viewportSize
+        ) {
+            snapshotFlow {
+                val viewportContentSize = viewerState.viewportState.contentSize
+                val visibleComparisons = pagesToCompose.joinToString(
+                    separator = ";",
+                    limit = 6
+                ) { pageIndex ->
+                    val frame = documentGeometry.pageFrames.getOrNull(pageIndex)
+
+                    "#${pageIndex + 1}:geomTop=${frame?.topPx},geomHeight=${frame?.heightPx}"
+                }
+                val scaledGeometryHeight = documentGeometry.totalHeightPx * viewerState.viewportState.visualScale
+                val scaledViewportContentHeight = viewportContentSize.height * viewerState.viewportState.visualScale
+
+                "geometryCompare doc=${viewerState.documentId} " +
+                    "geometryTotal=${documentGeometry.totalHeightPx} scaledGeometryTotal=$scaledGeometryHeight " +
+                    "viewportContent=${viewportContentSize.width}x${viewportContentSize.height} scaledViewportContentHeight=$scaledViewportContentHeight " +
+                    "viewportTop=$geometryViewportTop viewportBottom=$geometryViewportBottom " +
+                    "visibleCompare=[$visibleComparisons]"
+            }
+                .distinctUntilChanged()
+                .collect { message ->
+                    PdfViewerDebug.log { message }
+                }
+        }
+
+        LaunchedEffect(
+            viewerState.documentId,
+            documentGeometry,
+            viewportState.visualScale,
+            viewportState.panOffset,
+            viewportState.viewportSize
+        ) {
+            snapshotFlow {
+                "geometryVisible doc=${viewerState.documentId} " +
+                    "origin=$viewportOrigin scale=$scale pan=${viewportState.panOffset} " +
+                    "viewportPx=${viewportSize.width}x${viewportSize.height} " +
+                    "geometryViewportX=$geometryViewportLeft-$geometryViewportRight " +
+                    "geometryViewportY=$geometryViewportTop-$geometryViewportBottom " +
+                    "geometryVisible=${geometryVisiblePages.visibleRange} active=${geometryVisiblePages.activeRange} primary=${geometryVisiblePages.primaryVisiblePage} " +
+                    "composed=$pagesToCompose"
+            }
+                .distinctUntilChanged()
+                .collect { message ->
+                    PdfViewerDebug.log { message }
+                }
+        }
+
         PdfRenderScheduler(
             schedulerState = renderSchedulerState,
             documentId = viewerState.documentId,
-            visiblePages = virtualizerState.visiblePages,
+            visiblePages = geometryVisiblePages,
             renderQualityScale = viewerState.renderQualityScale,
             isEnabled = viewerState.canRunRenderScheduler,
             onRenderQualityDisplayed = viewerState::markRenderQualityDisplayed
         )
-
-        LaunchedEffect(listState.isScrollInProgress) {
-            if (
-                listState.isScrollInProgress &&
-                viewerState.interactionMode != PdfInteractionMode.ProgrammaticScroll
-            ) {
-                onUserInteraction()
-            }
-        }
 
         LaunchedEffect(viewerState.interactionMode) {
             if (
@@ -144,7 +316,15 @@ fun ContinuousPdfViewer(
             val target = viewerState.scrollTargetPage
 
             if (target != null && target in 0 until viewerState.pageCount) {
-                listState.animateScrollToItem(target)
+                val targetTopPx = documentGeometry.pageFrames
+                    .getOrNull(target)
+                    ?.topPx
+                    ?.coerceIn(0f, maxViewportTopPx)
+                    ?: geometryViewportTop
+                viewerState.viewportState.setViewportOrigin(
+                    leftPx = geometryViewportLeft,
+                    topPx = targetTopPx
+                )
                 viewerState.consumeScrollTarget()
             }
         }
@@ -171,68 +351,68 @@ fun ContinuousPdfViewer(
                 .fillMaxSize()
                 .background(CarrotColors.PdfCanvas)
         ) {
-            LazyColumn(
+            Box(
                 modifier = Modifier
-                    .width(pageLayout.contentWidth)
-                    .fillMaxHeight(),
-                state = listState,
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(pageLayout.pageSpacing),
-                contentPadding = PaddingValues(
-                    horizontal = pageLayout.horizontalPadding,
-                    vertical = pageLayout.verticalPadding
-                )
-            ) {
-                items(
-                    count = viewerState.pageCount,
-                    key = { pageIndex -> "$uri-$pageIndex" }
-                ) { pageIndex ->
-                    PdfPageItem(
-                        renderSchedulerState = renderSchedulerState,
-                        documentId = viewerState.documentId,
-                        pageIndex = pageIndex,
-                        pageWidth = pageLayout.pageWidth,
-                        pageAspectRatio = pageSizes.getOrNull(pageIndex)?.aspectRatio,
-                        renderQualityScale = viewerState.renderQualityScale,
-                        searchResults = searchResults.forPage(pageIndex),
-                        activeSearchResult = searchResults.getOrNull(activeSearchResultIndex)
+                    .fillMaxSize()
+                    .scrollable(
+                        state = scrollableState,
+                        orientation = Orientation.Vertical
                     )
+            ) {
+                pagesToCompose.forEach { pageIndex ->
+                    val frame = documentGeometry.pageFrames.getOrNull(pageIndex)
+                        ?: return@forEach
+                    val pageX = ((frame.leftPx - geometryViewportLeft) * scale).roundToInt()
+                    val pageY = ((frame.topPx - geometryViewportTop) * scale).roundToInt()
+
+                    key("$uri-$pageIndex") {
+                        Box(
+                            modifier = Modifier
+                                .offset {
+                                    IntOffset(
+                                        x = pageX,
+                                        y = pageY
+                                    )
+                                }
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    transformOrigin = TransformOrigin(0f, 0f)
+                                }
+                        ) {
+                            val pageWidth = with(density) { frame.widthPx.toDp() }
+
+                            PdfPageItem(
+                                renderSchedulerState = renderSchedulerState,
+                                documentId = viewerState.documentId,
+                                pageIndex = pageIndex,
+                                pageWidth = pageWidth,
+                                pageAspectRatio = pageSizes.getOrNull(pageIndex)?.aspectRatio,
+                                renderQualityScale = viewerState.renderQualityScale,
+                                searchResults = searchResults.forPage(pageIndex),
+                                activeSearchResult = searchResults.getOrNull(activeSearchResultIndex)
+                            )
+                        }
+                    }
                 }
             }
 
-            PdfFastScrollIndicator(
-                listState = listState,
-                currentPageIndex = viewerState.currentPageIndex,
-                pageCount = viewerState.pageCount,
-                pageIndicatorContent = pageIndicatorContent
-            )
-        }
-    }
-}
+            pageIndicatorContent(
+                viewerState.currentPageIndex + 1,
+                viewerState.pageCount.coerceAtLeast(1),
+                isManualScrollInProgress || viewerState.interactionMode != PdfInteractionMode.Idle,
+                scrollProgress
+                ) { targetProgress ->
+                    val targetTopPx = (targetProgress.coerceIn(0f, 1f) * maxViewportTopPx)
+                        .coerceIn(0f, maxViewportTopPx)
+                    val currentLeftPx = viewerState.viewportState.viewportOrigin().x
+                        .coerceIn(0f, maxViewportLeftPx)
 
-@Composable
-private fun PdfFastScrollIndicator(
-    listState: LazyListState,
-    currentPageIndex: Int,
-    pageCount: Int,
-    pageIndicatorContent: @Composable BoxScope.(
-        currentPage: Int,
-        pageCount: Int,
-        isScrollInProgress: Boolean,
-        onScrollToPage: (Int) -> Unit
-    ) -> Unit
-) {
-    val coroutineScope = rememberCoroutineScope()
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        pageIndicatorContent(
-            currentPageIndex + 1,
-            pageCount.coerceAtLeast(1),
-            listState.isScrollInProgress
-        ) { targetPage ->
-            coroutineScope.launch {
-                listState.scrollToItem(targetPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0)))
-            }
+                    viewerState.viewportState.setViewportOrigin(
+                        leftPx = currentLeftPx,
+                        topPx = targetTopPx
+                    )
+                }
         }
     }
 }
@@ -264,11 +444,15 @@ private fun PdfPageItem(
     var displayedBitmap by remember(documentId, pageIndex) {
         mutableStateOf<Bitmap?>(null)
     }
+    val density = LocalDensity.current
 
     val readyBitmap = (renderState as? PdfPageRenderState.Ready)?.bitmap
 
     LaunchedEffect(readyBitmap) {
         if (readyBitmap != null && !readyBitmap.isRecycled) {
+            PdfViewerDebug.log {
+                "renderBitmap doc=$documentId page=${pageIndex + 1} bitmap=${readyBitmap.width}x${readyBitmap.height} quality=$renderQualityScale"
+            }
             displayedBitmap = readyBitmap
         }
     }
@@ -286,6 +470,24 @@ private fun PdfPageItem(
     }
 
     val pageHeight = pageWidth * resolvedPageAspectRatio
+
+    LaunchedEffect(
+        documentId,
+        pageIndex,
+        pageWidth,
+        pageHeight,
+        pageAspectRatio,
+        resolvedPageAspectRatio
+    ) {
+        PdfViewerDebug.log {
+            val pageWidthPx = with(density) { pageWidth.roundToPx() }
+            val pageHeightPx = with(density) { pageHeight.roundToPx() }
+
+            "pageMeasure doc=$documentId page=${pageIndex + 1} " +
+                "widthDp=$pageWidth heightDp=$pageHeight widthPx=$pageWidthPx heightPx=$pageHeightPx " +
+                "sourceAspect=$pageAspectRatio resolvedAspect=$resolvedPageAspectRatio"
+        }
+    }
 
     Card(
         modifier = Modifier
@@ -381,6 +583,7 @@ private fun List<PdfSearchResult>.forPage(pageIndex: Int): List<PdfSearchResult>
 
 private const val DEFAULT_PAGE_ASPECT_RATIO = 1.414f
 private const val RENDER_REFINEMENT_DEBOUNCE_MS = 420L
+private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
 @Composable
 private fun PageMessage(
     text: String

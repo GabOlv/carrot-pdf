@@ -3,12 +3,9 @@ package com.example.carrotpdf.ui.viewer.viewport
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.ui.viewer.gesture.PdfGestureLayer
@@ -34,18 +31,7 @@ fun PdfViewport(
         PdfGestureLayer(
             viewerState = viewerState,
             onTransformEnded = onTransformEnded,
-            modifier = Modifier
-                .width(pageLayout.contentWidth)
-                .onSizeChanged(viewportState::updateContentSize)
-                .graphicsLayer {
-                    val visualScale = viewportState.visualScale
-
-                    scaleX = visualScale
-                    scaleY = visualScale
-                    translationX = viewportState.panOffset.x
-                    translationY = viewportState.panOffset.y
-                    transformOrigin = TransformOrigin(0f, 0f)
-                },
+            modifier = Modifier.matchParentSize(),
             content = content
         )
     }

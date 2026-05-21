@@ -6,6 +6,7 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.core.graphics.createBitmap
+import com.example.carrotpdf.ui.viewer.debug.PdfViewerDebug
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToInt
@@ -51,6 +52,10 @@ class PdfDocumentSession(
                 width = (page.width * renderScale).roundToInt().coerceAtLeast(1),
                 height = (page.height * renderScale).roundToInt().coerceAtLeast(1)
             )
+
+            PdfViewerDebug.log {
+                "renderRequest doc=${key.documentId} page=${safePageIndex + 1} pdfPage=${page.width}x${page.height} bucket=${key.scaleBucketPercent} renderScale=$renderScale bitmap=${bitmap.width}x${bitmap.height}"
+            }
 
             page.render(
                 bitmap,

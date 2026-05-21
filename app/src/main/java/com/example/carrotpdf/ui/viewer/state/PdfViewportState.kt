@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
+import com.example.carrotpdf.ui.viewer.debug.PdfViewerDebug
 import kotlin.math.abs
 
 @Stable
@@ -42,11 +43,17 @@ class PdfViewportState(
 
     fun updateViewportSize(size: IntSize) {
         viewportSize = size
+        PdfViewerDebug.log {
+            "viewportSize width=${size.width} height=${size.height} scale=$visualScale pan=$panOffset"
+        }
         panOffset = coercePanOffset(panOffset, visualScale)
     }
 
     fun updateContentSize(size: IntSize) {
         contentSize = size
+        PdfViewerDebug.log {
+            "contentSize width=${size.width} height=${size.height} scale=$visualScale pan=$panOffset"
+        }
         panOffset = coercePanOffset(panOffset, visualScale)
     }
 
@@ -87,6 +94,9 @@ class PdfViewportState(
             ),
             scale = newScale
         )
+        PdfViewerDebug.log {
+            "transform zoomChange=$zoomChange centroid=$centroid panDelta=$pan scale=$visualScale pan=$panOffset viewport=$viewportSize content=$contentSize"
+        }
     }
 
     fun panBy(delta: Offset): Boolean {
@@ -95,11 +105,42 @@ class PdfViewportState(
             offset = panOffset + delta,
             scale = visualScale
         )
+        PdfViewerDebug.log {
+            "pan delta=$delta previous=$previousOffset next=$panOffset scale=$visualScale viewport=$viewportSize content=$contentSize"
+        }
         return panOffset != previousOffset
+    }
+
+    fun setViewportOrigin(
+        leftPx: Float,
+        topPx: Float
+    ) {
+        panOffset = coercePanOffset(
+            offset = Offset(
+                x = -leftPx * visualScale,
+                y = -topPx * visualScale
+            ),
+            scale = visualScale
+        )
+        PdfViewerDebug.log {
+            "setViewportOrigin left=$leftPx top=$topPx scale=$visualScale pan=$panOffset viewport=$viewportSize content=$contentSize"
+        }
+    }
+
+    fun viewportOrigin(): Offset {
+        val scale = visualScale.coerceAtLeast(0.001f)
+
+        return Offset(
+            x = -panOffset.x / scale,
+            y = -panOffset.y / scale
+        )
     }
 
     fun endTransform(): Float {
         panOffset = coercePanOffset(panOffset, visualScale)
+        PdfViewerDebug.log {
+            "transformEnd scale=$visualScale pan=$panOffset viewport=$viewportSize content=$contentSize"
+        }
         return visualScale
     }
 
@@ -177,10 +218,16 @@ class PdfViewportState(
             (viewportWidth - scaledContentWidth) / 2f
         }
 
-        return Offset(
+        val coercedOffset = Offset(
             x = coercedX,
             y = offset.y.coerceIn(minY, 0f)
         )
+
+        PdfViewerDebug.log {
+            "panBounds requested=$offset coerced=$coercedOffset scale=$scale viewport=${viewportSize.width}x${viewportSize.height} content=${contentSize.width}x${contentSize.height} scaled=${scaledContentWidth}x$scaledContentHeight minY=$minY"
+        }
+
+        return coercedOffset
     }
 
     private fun renderQualityFor(scale: Float): Float {
