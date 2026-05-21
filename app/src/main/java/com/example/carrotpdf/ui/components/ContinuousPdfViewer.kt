@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +42,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -49,6 +51,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.ui.design.CarrotColors
+import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageLayout
 import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageVirtualizer
 import com.example.carrotpdf.ui.viewer.render.PdfPageRenderState
@@ -67,7 +70,9 @@ fun ContinuousPdfViewer(
     uri: Uri,
     viewerState: PdfViewerState,
     onCurrentPageChange: (Int) -> Unit,
-    onZoomCommitted: (Float) -> Unit
+    onZoomCommitted: (Float) -> Unit,
+    searchResults: List<PdfSearchResult> = emptyList(),
+    activeSearchResultIndex: Int = -1
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -172,7 +177,9 @@ fun ContinuousPdfViewer(
                         documentId = viewerState.documentId,
                         pageIndex = pageIndex,
                         pageWidth = pageLayout.pageWidth,
-                        renderQualityScale = viewerState.renderQualityScale
+                        renderQualityScale = viewerState.renderQualityScale,
+                        searchResults = searchResults.forPage(pageIndex),
+                        activeSearchResult = searchResults.getOrNull(activeSearchResultIndex)
                     )
                 }
             }
@@ -332,7 +339,9 @@ private fun PdfPageItem(
     documentId: String,
     pageIndex: Int,
     pageWidth: androidx.compose.ui.unit.Dp,
-    renderQualityScale: Float
+    renderQualityScale: Float,
+    searchResults: List<PdfSearchResult>,
+    activeSearchResult: PdfSearchResult?
 ) {
     val renderKey = remember(
         documentId,
@@ -387,12 +396,22 @@ private fun PdfPageItem(
     ) {
         when {
             bitmapToShow != null -> {
-                Image(
-                    bitmap = bitmapToShow.asImageBitmap(),
-                    contentDescription = "PDF page ${pageIndex + 1}",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.FillBounds
-                )
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Image(
+                        bitmap = bitmapToShow.asImageBitmap(),
+                        contentDescription = "PDF page ${pageIndex + 1}",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.FillBounds
+                    )
+
+                    SearchHighlightOverlay(
+                        results = searchResults,
+                        activeSearchResult = activeSearchResult,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
 
             renderState == PdfPageRenderState.Failed -> {
@@ -408,6 +427,51 @@ private fun PdfPageItem(
             }
         }
     }
+}
+
+@Composable
+private fun SearchHighlightOverlay(
+    results: List<PdfSearchResult>,
+    activeSearchResult: PdfSearchResult?,
+    modifier: Modifier = Modifier
+) {
+    if (results.isEmpty()) {
+        return
+    }
+
+    Canvas(modifier = modifier) {
+        results.forEach { result ->
+            val isActive = result == activeSearchResult
+            val color = if (isActive) {
+                Color(0xCCFFD84D)
+            } else {
+                Color(0x77FFD84D)
+            }
+
+            result.bounds.forEach { bound ->
+                if (bound.pageWidth > 0f && bound.pageHeight > 0f) {
+                    val left = (bound.left / bound.pageWidth) * size.width
+                    val top = (bound.top / bound.pageHeight) * size.height
+                    val right = (bound.right / bound.pageWidth) * size.width
+                    val bottom = (bound.bottom / bound.pageHeight) * size.height
+
+                    drawRect(
+                        color = color,
+                        topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                        size = androidx.compose.ui.geometry.Size(
+                            width = (right - left).coerceAtLeast(2f),
+                            height = (bottom - top).coerceAtLeast(2f)
+                        ),
+                        style = Fill
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun List<PdfSearchResult>.forPage(pageIndex: Int): List<PdfSearchResult> {
+    return filter { it.pageIndex == pageIndex }
 }
 
 private const val DEFAULT_PAGE_ASPECT_RATIO = 1.414f

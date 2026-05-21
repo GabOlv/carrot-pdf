@@ -173,10 +173,11 @@ private fun CarrotPdfContent(
     var isSettingsModalOpen by remember { mutableStateOf(false) }
     var isRecentFilesModalOpen by remember { mutableStateOf(false) }
     var isCategoriesModalOpen by remember { mutableStateOf(false) }
-    var isSearchModalOpen by remember { mutableStateOf(false) }
+    var isSearchBarVisible by remember { mutableStateOf(false) }
     var categoryNameInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
+    var activeSearchResultIndex by remember { mutableStateOf(-1) }
     var closeTabRequest by remember { mutableStateOf<PdfTab?>(null) }
     var categoryDeleteRequest by remember { mutableStateOf<PdfCategory?>(null) }
     var categoryDeleteInput by remember { mutableStateOf("") }
@@ -354,6 +355,38 @@ private fun CarrotPdfContent(
         }
     }
 
+    LaunchedEffect(isSearchBarVisible, searchQuery, activeTab?.id) {
+        val tab = activeTab
+        val query = searchQuery.trim()
+
+        if (!isSearchBarVisible || tab == null || query.isBlank()) {
+            searchResults.clear()
+            activeSearchResultIndex = -1
+            isSearching = false
+            return@LaunchedEffect
+        }
+
+        delay(SEARCH_DEBOUNCE_MS)
+        isSearching = true
+
+        val results = withContext(Dispatchers.IO) {
+            searchPdfText(
+                context = context.applicationContext,
+                uri = tab.uri,
+                query = query
+            )
+        }
+
+        searchResults.clear()
+        searchResults.addAll(results)
+        activeSearchResultIndex = if (results.isNotEmpty()) 0 else -1
+        isSearching = false
+
+        results.firstOrNull()?.let { result ->
+            activeViewerState?.requestScrollToPage(result.pageIndex)
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = CarrotColors.Background
@@ -401,7 +434,45 @@ private fun CarrotPdfContent(
                     activeTab = activeTab,
                     viewerState = activeViewerState,
                     isLoadingDocument = isLoadingDocument,
+                    isSearchBarVisible = isSearchBarVisible,
+                    searchQuery = searchQuery,
+                    isSearching = isSearching,
+                    searchResults = searchResults,
+                    activeSearchResultIndex = activeSearchResultIndex,
                     onOpenPdf = openPdf,
+                    onSearchQueryChange = { query ->
+                        searchQuery = query
+                    },
+                    onCloseSearch = {
+                        isSearchBarVisible = false
+                        searchQuery = ""
+                        searchResults.clear()
+                        activeSearchResultIndex = -1
+                    },
+                    onPreviousSearchResult = {
+                        if (searchResults.isNotEmpty()) {
+                            activeSearchResultIndex = if (activeSearchResultIndex <= 0) {
+                                searchResults.lastIndex
+                            } else {
+                                activeSearchResultIndex - 1
+                            }
+                            searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
+                                activeViewerState?.requestScrollToPage(result.pageIndex)
+                            }
+                        }
+                    },
+                    onNextSearchResult = {
+                        if (searchResults.isNotEmpty()) {
+                            activeSearchResultIndex = if (activeSearchResultIndex >= searchResults.lastIndex) {
+                                0
+                            } else {
+                                activeSearchResultIndex + 1
+                            }
+                            searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
+                                activeViewerState?.requestScrollToPage(result.pageIndex)
+                            }
+                        }
+                    },
                     onCurrentPageChange = { pageIndex ->
                         updateActiveTab(tabs, activeTabId) { tab ->
                             if (tab.currentPageIndex == pageIndex) {
@@ -444,7 +515,7 @@ private fun CarrotPdfContent(
                         },
                         onEditClick = {},
                         onSearchClick = {
-                            isSearchModalOpen = true
+                            isSearchBarVisible = !isSearchBarVisible
                         },
                         onConfigClick = {
                             isSettingsModalOpen = true
@@ -575,40 +646,6 @@ private fun CarrotPdfContent(
                 )
             }
 
-            if (isSearchModalOpen) {
-                SearchModal(
-                    activeTab = activeTab,
-                    query = searchQuery,
-                    isSearching = isSearching,
-                    results = searchResults,
-                    onQueryChange = { searchQuery = it },
-                    onSearch = {
-                        val tab = activeTab ?: return@SearchModal
-
-                        coroutineScope.launch {
-                            isSearching = true
-                            val results = withContext(Dispatchers.IO) {
-                                searchPdfText(
-                                    context = context.applicationContext,
-                                    uri = tab.uri,
-                                    query = searchQuery
-                                )
-                            }
-                            searchResults.clear()
-                            searchResults.addAll(results)
-                            isSearching = false
-                        }
-                    },
-                    onOpenResult = { result ->
-                        activeViewerState?.requestScrollToPage(result.pageIndex)
-                        isSearchModalOpen = false
-                    },
-                    onDismiss = {
-                        isSearchModalOpen = false
-                    }
-                )
-            }
-
             if (closeTabRequest != null) {
                 ConfirmCloseTabDialog(
                     tab = closeTabRequest,
@@ -674,7 +711,16 @@ private fun PdfContentArea(
     activeTab: PdfTab?,
     viewerState: PdfViewerState?,
     isLoadingDocument: Boolean,
+    isSearchBarVisible: Boolean,
+    searchQuery: String,
+    isSearching: Boolean,
+    searchResults: List<PdfSearchResult>,
+    activeSearchResultIndex: Int,
     onOpenPdf: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onCloseSearch: () -> Unit,
+    onPreviousSearchResult: () -> Unit,
+    onNextSearchResult: () -> Unit,
     onCurrentPageChange: (Int) -> Unit,
     onZoomCommitted: (Float) -> Unit,
     modifier: Modifier = Modifier
@@ -703,7 +749,9 @@ private fun PdfContentArea(
                     uri = activeTab.uri,
                     viewerState = viewerState,
                     onCurrentPageChange = onCurrentPageChange,
-                    onZoomCommitted = onZoomCommitted
+                    onZoomCommitted = onZoomCommitted,
+                    searchResults = searchResults,
+                    activeSearchResultIndex = activeSearchResultIndex
                 )
 
                 ReaderZoomBubble(
@@ -712,6 +760,22 @@ private fun PdfContentArea(
                         .align(Alignment.BottomEnd)
                         .padding(end = 20.dp, bottom = 18.dp)
                 )
+
+                if (isSearchBarVisible) {
+                    ReaderSearchStrip(
+                        query = searchQuery,
+                        isSearching = isSearching,
+                        resultCount = searchResults.size,
+                        activeResultIndex = activeSearchResultIndex,
+                        onQueryChange = onSearchQueryChange,
+                        onClose = onCloseSearch,
+                        onPrevious = onPreviousSearchResult,
+                        onNext = onNextSearchResult,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    )
+                }
             }
         }
     }
@@ -750,6 +814,81 @@ private fun ReaderZoomBubble(
                 )
                 .padding(horizontal = 14.dp, vertical = 8.dp)
         )
+    }
+}
+
+@Composable
+private fun ReaderSearchStrip(
+    query: String,
+    isSearching: Boolean,
+    resultCount: Int,
+    activeResultIndex: Int,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                color = CarrotColors.Surface.copy(alpha = 0.96f),
+                shape = RoundedCornerShape(18.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(onClick = onClose) {
+            Text(
+                text = "<",
+                color = CarrotColors.TextSecondary,
+                style = MaterialTheme.typography.titleLarge
+            )
+        }
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            placeholder = {
+                Text("Search")
+            },
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+        )
+
+        Text(
+            text = when {
+                isSearching -> "..."
+                resultCount == 0 -> "0"
+                else -> "${activeResultIndex + 1} of $resultCount"
+            },
+            color = CarrotColors.TextSecondary,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
+        TextButton(
+            enabled = resultCount > 0,
+            onClick = onPrevious
+        ) {
+            Text(
+                text = "<",
+                color = if (resultCount > 0) CarrotColors.TextSecondary else CarrotColors.TextMuted,
+                style = MaterialTheme.typography.titleLarge
+            )
+        }
+
+        TextButton(
+            enabled = resultCount > 0,
+            onClick = onNext
+        ) {
+            Text(
+                text = ">",
+                color = if (resultCount > 0) CarrotColors.TextSecondary else CarrotColors.TextMuted,
+                style = MaterialTheme.typography.titleLarge
+            )
+        }
     }
 }
 
@@ -1557,4 +1696,5 @@ private fun getPdfTitle(
 }
 
 private const val ZOOM_CHIP_VISIBLE_MS = 1200L
+private const val SEARCH_DEBOUNCE_MS = 320L
 private const val MAX_RECENT_FILES = 24
