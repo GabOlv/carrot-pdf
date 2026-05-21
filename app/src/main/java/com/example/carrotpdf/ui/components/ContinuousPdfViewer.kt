@@ -72,7 +72,8 @@ fun ContinuousPdfViewer(
     onCurrentPageChange: (Int) -> Unit,
     onZoomCommitted: (Float) -> Unit,
     searchResults: List<PdfSearchResult> = emptyList(),
-    activeSearchResultIndex: Int = -1
+    activeSearchResultIndex: Int = -1,
+    onUserInteraction: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -124,6 +125,18 @@ fun ContinuousPdfViewer(
             isEnabled = viewerState.canRunRenderScheduler,
             onRenderQualityDisplayed = viewerState::markRenderQualityDisplayed
         )
+
+        LaunchedEffect(listState.isScrollInProgress) {
+            if (listState.isScrollInProgress) {
+                onUserInteraction()
+            }
+        }
+
+        LaunchedEffect(viewerState.interactionMode) {
+            if (viewerState.interactionMode != com.example.carrotpdf.ui.viewer.state.PdfInteractionMode.Idle) {
+                onUserInteraction()
+            }
+        }
 
         LaunchedEffect(viewerState.scrollTargetPage) {
             val target = viewerState.scrollTargetPage
