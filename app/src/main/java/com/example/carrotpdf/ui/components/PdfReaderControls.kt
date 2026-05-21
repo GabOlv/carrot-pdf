@@ -24,8 +24,9 @@ import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 fun PdfReaderControls(
     activeTab: PdfTab?,
     viewerState: PdfViewerState?,
+    isBookmarked: Boolean,
     onBookmarkClick: () -> Unit,
-    onExpandClick: () -> Unit,
+    onCategoriesClick: () -> Unit,
     onEditClick: () -> Unit,
     onSearchClick: () -> Unit,
     onConfigClick: () -> Unit
@@ -42,13 +43,13 @@ fun PdfReaderControls(
     ) {
         FooterIconButton(
             icon = FooterIcon.Bookmark,
-            isAccent = hasDocument,
+            isAccent = isBookmarked,
             onClick = onBookmarkClick
         )
 
         FooterIconButton(
-            icon = FooterIcon.Fullscreen,
-            onClick = onExpandClick
+            icon = FooterIcon.Categories,
+            onClick = onCategoriesClick
         )
 
         FooterIconButton(
@@ -89,33 +90,23 @@ private fun FooterIconButton(
 
             when (icon) {
                 FooterIcon.Config -> {
-                    listOf(6.dp, 12.dp, 18.dp).forEachIndexed { index, y ->
-                        val knobX = listOf(9.dp, 15.dp, 11.dp)[index]
-
-                        drawLine(
-                            color = color,
-                            start = Offset(3.dp.toPx(), y.toPx()),
-                            end = Offset(21.dp.toPx(), y.toPx()),
-                            strokeWidth = stroke,
-                            cap = StrokeCap.Round
-                        )
+                    listOf(6.dp, 12.dp, 18.dp).forEach { y ->
                         drawCircle(
                             color = color,
-                            radius = 2.2.dp.toPx(),
-                            center = Offset(knobX.toPx(), y.toPx())
+                            radius = 1.8.dp.toPx(),
+                            center = Offset(12.dp.toPx(), y.toPx())
                         )
                     }
                 }
 
-                FooterIcon.Fullscreen -> {
-                    drawLine(color, Offset(4.dp.toPx(), 9.dp.toPx()), Offset(4.dp.toPx(), 4.dp.toPx()), stroke, StrokeCap.Round)
-                    drawLine(color, Offset(4.dp.toPx(), 4.dp.toPx()), Offset(9.dp.toPx(), 4.dp.toPx()), stroke, StrokeCap.Round)
-                    drawLine(color, Offset(20.dp.toPx(), 9.dp.toPx()), Offset(20.dp.toPx(), 4.dp.toPx()), stroke, StrokeCap.Round)
-                    drawLine(color, Offset(20.dp.toPx(), 4.dp.toPx()), Offset(15.dp.toPx(), 4.dp.toPx()), stroke, StrokeCap.Round)
-                    drawLine(color, Offset(4.dp.toPx(), 15.dp.toPx()), Offset(4.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
-                    drawLine(color, Offset(4.dp.toPx(), 20.dp.toPx()), Offset(9.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
-                    drawLine(color, Offset(20.dp.toPx(), 15.dp.toPx()), Offset(20.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
-                    drawLine(color, Offset(20.dp.toPx(), 20.dp.toPx()), Offset(15.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
+                FooterIcon.Categories -> {
+                    drawLine(color, Offset(5.dp.toPx(), 6.dp.toPx()), Offset(11.dp.toPx(), 4.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(color, Offset(11.dp.toPx(), 4.dp.toPx()), Offset(19.dp.toPx(), 6.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(color, Offset(5.dp.toPx(), 6.dp.toPx()), Offset(5.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(color, Offset(19.dp.toPx(), 6.dp.toPx()), Offset(19.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(color, Offset(5.dp.toPx(), 20.dp.toPx()), Offset(12.dp.toPx(), 17.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(color, Offset(19.dp.toPx(), 20.dp.toPx()), Offset(12.dp.toPx(), 17.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(color, Offset(12.dp.toPx(), 5.dp.toPx()), Offset(12.dp.toPx(), 17.dp.toPx()), 1.4.dp.toPx(), StrokeCap.Round)
                 }
 
                 FooterIcon.Draw -> {
@@ -179,7 +170,7 @@ private fun FooterIconButton(
 
 private enum class FooterIcon {
     Bookmark,
-    Fullscreen,
+    Categories,
     Draw,
     Search,
     Config

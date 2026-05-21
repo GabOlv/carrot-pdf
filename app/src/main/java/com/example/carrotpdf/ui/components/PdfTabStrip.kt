@@ -1,7 +1,9 @@
 package com.example.carrotpdf.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -15,8 +17,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -27,8 +34,10 @@ import com.example.carrotpdf.ui.design.CarrotColors
 fun PdfTabStrip(
     tabs: List<PdfTab>,
     activeTabId: String?,
+    isBookmarked: (String) -> Boolean,
     onSelectTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
+    onMoveTab: (String, Int) -> Unit,
     onOpenPdf: () -> Unit
 ) {
     Row(
@@ -38,14 +47,46 @@ fun PdfTabStrip(
             .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        tabs.forEach { tab ->
+        tabs.forEachIndexed { visibleIndex, tab ->
             val isActive = tab.id == activeTabId
+            val isPinned = isBookmarked(tab.id)
+            var dragAmount by remember(tab.id) { mutableFloatStateOf(0f) }
 
             Box(
                 modifier = Modifier
                     .width(132.dp)
                     .fillMaxHeight()
                     .background(CarrotColors.Surface)
+                    .border(
+                        width = if (isPinned) 1.dp else 0.dp,
+                        color = if (isPinned) CarrotColors.Accent else CarrotColors.Surface
+                    )
+                    .pointerInput(tab.id, visibleIndex) {
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                dragAmount = 0f
+                            },
+                            onHorizontalDrag = { _, dragDelta ->
+                                dragAmount += dragDelta
+                            },
+                            onDragEnd = {
+                                when {
+                                    dragAmount > TAB_REORDER_THRESHOLD_PX -> {
+                                        onMoveTab(tab.id, visibleIndex - 1)
+                                    }
+
+                                    dragAmount < -TAB_REORDER_THRESHOLD_PX -> {
+                                        onMoveTab(tab.id, visibleIndex + 1)
+                                    }
+                                }
+
+                                dragAmount = 0f
+                            },
+                            onDragCancel = {
+                                dragAmount = 0f
+                            }
+                        )
+                    }
                     .clickable { onSelectTab(tab.id) }
             ) {
                 Row(
@@ -65,6 +106,16 @@ fun PdfTabStrip(
                     )
 
                     Spacer(modifier = Modifier.width(8.dp))
+
+                    if (isPinned) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .background(CarrotColors.Accent)
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
 
                     Text(
                         modifier = Modifier.clickable {
@@ -110,3 +161,5 @@ fun PdfTabStrip(
         }
     }
 }
+
+private const val TAB_REORDER_THRESHOLD_PX = 48f
