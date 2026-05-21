@@ -38,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.ui.viewer.layout.rememberPdfPageLayout
@@ -61,6 +62,7 @@ fun ContinuousPdfViewer(
     onZoomCommitted: (Float) -> Unit,
     searchResults: List<PdfSearchResult> = emptyList(),
     activeSearchResultIndex: Int = -1,
+    pageSizes: List<PdfPageSize> = emptyList(),
     onUserInteraction: () -> Unit = {},
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
@@ -190,6 +192,7 @@ fun ContinuousPdfViewer(
                         documentId = viewerState.documentId,
                         pageIndex = pageIndex,
                         pageWidth = pageLayout.pageWidth,
+                        pageAspectRatio = pageSizes.getOrNull(pageIndex)?.aspectRatio,
                         renderQualityScale = viewerState.renderQualityScale,
                         searchResults = searchResults.forPage(pageIndex),
                         activeSearchResult = searchResults.getOrNull(activeSearchResultIndex)
@@ -240,6 +243,7 @@ private fun PdfPageItem(
     documentId: String,
     pageIndex: Int,
     pageWidth: androidx.compose.ui.unit.Dp,
+    pageAspectRatio: Float?,
     renderQualityScale: Float,
     searchResults: List<PdfSearchResult>,
     activeSearchResult: PdfSearchResult?
@@ -275,13 +279,13 @@ private fun PdfPageItem(
         else -> null
     }
 
-    val pageAspectRatio = if (bitmapToShow != null) {
+    val resolvedPageAspectRatio = pageAspectRatio ?: if (bitmapToShow != null) {
         bitmapToShow.height.toFloat() / bitmapToShow.width.toFloat()
     } else {
         DEFAULT_PAGE_ASPECT_RATIO
     }
 
-    val pageHeight = pageWidth * pageAspectRatio
+    val pageHeight = pageWidth * resolvedPageAspectRatio
 
     Card(
         modifier = Modifier

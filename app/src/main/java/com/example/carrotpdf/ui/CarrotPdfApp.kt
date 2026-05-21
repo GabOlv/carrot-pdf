@@ -75,8 +75,10 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.pdf.PdfSearchResult
+import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
+import com.example.carrotpdf.pdf.getPdfPageSizes
 import com.example.carrotpdf.pdf.printPdf
 import com.example.carrotpdf.pdf.searchPdfText
 import com.example.carrotpdf.pdf.sharePdf
@@ -202,18 +204,25 @@ private fun CarrotPdfContent() {
 
         val tab = activeTab ?: return@LaunchedEffect
 
-        if (tab.pageCount == 0) {
+        if (tab.pageCount == 0 || tab.pageSizes.isEmpty()) {
             isLoadingDocument = true
 
-            val pageCount = withContext(Dispatchers.IO) {
-                getPdfPageCount(context, tab.uri)
+            val pageSizes = withContext(Dispatchers.IO) {
+                getPdfPageSizes(context, tab.uri)
             }
+            val pageCount = pageSizes.size.takeIf { it > 0 }
+                ?: withContext(Dispatchers.IO) {
+                    getPdfPageCount(context, tab.uri)
+                }
 
             isLoadingDocument = false
 
             if (pageCount > 0) {
                 updateActiveTab(tabs, tab.id) { currentTab ->
-                    currentTab.copy(pageCount = pageCount)
+                    currentTab.copy(
+                        pageCount = pageCount,
+                        pageSizes = pageSizes
+                    )
                 }
             }
         }
@@ -266,6 +275,7 @@ private fun CarrotPdfContent() {
                 isLoadingDocument = isLoadingDocument,
                 searchResults = searchResults,
                 activeSearchResultIndex = activeSearchResultIndex,
+                pageSizes = activeTab?.pageSizes.orEmpty(),
                 pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, onScrollToPage ->
                     DrivePageIndicator(
                         currentPage = currentPage,
@@ -476,6 +486,7 @@ private fun ReaderStage(
     isLoadingDocument: Boolean,
     searchResults: List<PdfSearchResult>,
     activeSearchResultIndex: Int,
+    pageSizes: List<PdfPageSize>,
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
         pageCount: Int,
@@ -522,6 +533,7 @@ private fun ReaderStage(
                     onZoomCommitted = onZoomCommitted,
                     searchResults = searchResults,
                     activeSearchResultIndex = activeSearchResultIndex,
+                    pageSizes = pageSizes,
                     onUserInteraction = onUserInteraction,
                     pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, onScrollToPage ->
                         pageIndicatorContent(
