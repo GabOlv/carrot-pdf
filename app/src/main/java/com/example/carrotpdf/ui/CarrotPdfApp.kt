@@ -3,6 +3,7 @@ package com.example.carrotpdf.ui
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -27,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -39,17 +41,27 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.carrotpdf.R
+import com.example.carrotpdf.data.CarrotLibraryStore
+import com.example.carrotpdf.model.PdfBookmark
 import com.example.carrotpdf.model.PdfCategory
 import com.example.carrotpdf.model.PdfTab
+import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
+import com.example.carrotpdf.pdf.printPdf
+import com.example.carrotpdf.pdf.PdfSearchResult
+import com.example.carrotpdf.pdf.searchPdfText
+import com.example.carrotpdf.pdf.sharePdf
 import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.EmptyState
 import com.example.carrotpdf.ui.components.PdfReaderControls
@@ -60,6 +72,7 @@ import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -85,18 +98,55 @@ private fun CarrotPdfContent(
     onToggleTheme: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val libraryStore = remember(context) {
+        CarrotLibraryStore(context.applicationContext)
+    }
+    val initialLibrary = remember(libraryStore) {
+        libraryStore.load()
+    }
 
-    val tabs = remember { mutableStateListOf<PdfTab>() }
-    val categories = remember { mutableStateListOf(PdfCategory.Default) }
-    val bookmarkedTabCategories = remember { mutableStateMapOf<String, String>() }
-    val pinnedTabOrder = remember { mutableStateListOf<String>() }
+    val tabs = remember {
+        mutableStateListOf<PdfTab>().apply {
+            initialLibrary.bookmarks.forEach { bookmark ->
+                add(
+                    PdfTab(
+                        id = bookmark.tabId,
+                        uri = Uri.parse(bookmark.uri),
+                        title = bookmark.title
+                    )
+                )
+            }
+        }
+    }
+    val categories = remember {
+        mutableStateListOf<PdfCategory>().apply {
+            addAll(initialLibrary.categories)
+        }
+    }
+    val bookmarkedTabCategories = remember {
+        mutableStateMapOf<String, String>().apply {
+            initialLibrary.bookmarks.forEach { bookmark ->
+                put(bookmark.tabId, bookmark.categoryId)
+            }
+        }
+    }
+    val pinnedTabOrder = remember {
+        mutableStateListOf<String>().apply {
+            addAll(initialLibrary.bookmarks.map { bookmark -> bookmark.tabId })
+        }
+    }
 
-    var activeTabId by remember { mutableStateOf<String?>(null) }
+    var activeTabId by remember { mutableStateOf(tabs.firstOrNull()?.id) }
     var isFullscreenReader by remember { mutableStateOf(false) }
     var isSettingsModalOpen by remember { mutableStateOf(false) }
     var isCategoriesModalOpen by remember { mutableStateOf(false) }
+    var isSearchModalOpen by remember { mutableStateOf(false) }
     var categoryNameInput by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearching by remember { mutableStateOf(false) }
     var closeBookmarkedTabRequest by remember { mutableStateOf<PdfTab?>(null) }
+    val searchResults = remember { mutableStateListOf<PdfSearchResult>() }
 
     var isLoadingDocument by remember { mutableStateOf(false) }
 
@@ -137,9 +187,29 @@ private fun CarrotPdfContent(
         pdfPicker.launch(arrayOf("application/pdf"))
     }
 
+    fun persistLibrary() {
+        val bookmarks = pinnedTabOrder.mapNotNull { tabId ->
+            val tab = tabs.firstOrNull { it.id == tabId } ?: return@mapNotNull null
+            val categoryId = bookmarkedTabCategories[tabId] ?: return@mapNotNull null
+
+            PdfBookmark(
+                tabId = tab.id,
+                uri = tab.uri.toString(),
+                title = tab.title,
+                categoryId = categoryId
+            )
+        }
+
+        libraryStore.save(
+            categories = categories,
+            bookmarks = bookmarks
+        )
+    }
+
     val removeBookmark: (String) -> Unit = { tabId ->
         bookmarkedTabCategories.remove(tabId)
         pinnedTabOrder.remove(tabId)
+        persistLibrary()
     }
 
     val closeTab: (String) -> Unit = { tabId ->
@@ -165,6 +235,8 @@ private fun CarrotPdfContent(
             if (tab.id !in pinnedTabOrder) {
                 pinnedTabOrder.add(tab.id)
             }
+
+            persistLibrary()
         }
     }
 
@@ -226,6 +298,7 @@ private fun CarrotPdfContent(
                                 tabId = tabId,
                                 targetVisibleIndex = visibleIndex
                             )
+                            persistLibrary()
                         },
                         onOpenPdf = openPdf
                     )
@@ -277,7 +350,9 @@ private fun CarrotPdfContent(
                             isCategoriesModalOpen = true
                         },
                         onEditClick = {},
-                        onSearchClick = {},
+                        onSearchClick = {
+                            isSearchModalOpen = true
+                        },
                         onConfigClick = {
                             isSettingsModalOpen = true
                         }
@@ -310,6 +385,32 @@ private fun CarrotPdfContent(
                         isSettingsModalOpen = false
                         openPdf()
                     },
+                    onSharePdf = {
+                        val tab = activeTab
+
+                        if (tab != null) {
+                            sharePdf(context, tab.uri, tab.title)
+                        }
+                    },
+                    onDownloadPdf = {
+                        val tab = activeTab
+
+                        if (tab != null) {
+                            val success = downloadPdf(context, tab.uri, tab.title)
+                            Toast.makeText(
+                                context,
+                                if (success) "PDF baixado" else "Nao foi possivel baixar",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    onPrintPdf = {
+                        val tab = activeTab
+
+                        if (tab != null) {
+                            printPdf(context, tab.uri, tab.title)
+                        }
+                    },
                     onDismiss = {
                         isSettingsModalOpen = false
                     }
@@ -331,6 +432,7 @@ private fun CarrotPdfContent(
                             categories.add(category)
                             categoryNameInput = ""
                             bookmarkActiveTab(category.id)
+                            persistLibrary()
                             isCategoriesModalOpen = false
                         }
                     },
@@ -340,6 +442,40 @@ private fun CarrotPdfContent(
                     },
                     onDismiss = {
                         isCategoriesModalOpen = false
+                    }
+                )
+            }
+
+            if (isSearchModalOpen) {
+                SearchModal(
+                    activeTab = activeTab,
+                    query = searchQuery,
+                    isSearching = isSearching,
+                    results = searchResults,
+                    onQueryChange = { searchQuery = it },
+                    onSearch = {
+                        val tab = activeTab ?: return@SearchModal
+
+                        coroutineScope.launch {
+                            isSearching = true
+                            val results = withContext(Dispatchers.IO) {
+                                searchPdfText(
+                                    context = context.applicationContext,
+                                    uri = tab.uri,
+                                    query = searchQuery
+                                )
+                            }
+                            searchResults.clear()
+                            searchResults.addAll(results)
+                            isSearching = false
+                        }
+                    },
+                    onOpenResult = { result ->
+                        activeViewerState?.requestScrollToPage(result.pageIndex)
+                        isSearchModalOpen = false
+                    },
+                    onDismiss = {
+                        isSearchModalOpen = false
                     }
                 )
             }
@@ -447,6 +583,9 @@ private fun ReaderZoomBubble(
 @Composable
 private fun ReaderSettingsModal(
     onOpenPdf: () -> Unit,
+    onSharePdf: () -> Unit,
+    onDownloadPdf: () -> Unit,
+    onPrintPdf: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -462,28 +601,28 @@ private fun ReaderSettingsModal(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 SettingsActionCard(
-                    icon = "+",
+                    iconResId = R.drawable.ic_action_open_pdf,
                     title = "Abrir PDF",
                     subtitle = "Escolher um arquivo local",
                     onClick = onOpenPdf
                 )
                 SettingsActionCard(
-                    icon = "^",
+                    iconResId = R.drawable.ic_action_share,
                     title = "Enviar Arquivo",
                     subtitle = "Compartilhar uma copia",
-                    onClick = {}
+                    onClick = onSharePdf
                 )
                 SettingsActionCard(
-                    icon = "v",
+                    iconResId = R.drawable.ic_action_download,
                     title = "Baixar",
                     subtitle = "Salvar uma copia local",
-                    onClick = {}
+                    onClick = onDownloadPdf
                 )
                 SettingsActionCard(
-                    icon = "#",
+                    iconResId = R.drawable.ic_action_print,
                     title = "Imprimir",
                     subtitle = "Enviar para impressora",
-                    onClick = {}
+                    onClick = onPrintPdf
                 )
             }
         },
@@ -503,7 +642,7 @@ private fun ReaderSettingsModal(
 
 @Composable
 private fun SettingsActionCard(
-    icon: String,
+    iconResId: Int,
     title: String,
     subtitle: String,
     onClick: () -> Unit
@@ -533,11 +672,11 @@ private fun SettingsActionCard(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = icon,
-                    color = CarrotColors.Accent,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                Icon(
+                    painter = painterResource(iconResId),
+                    contentDescription = title,
+                    tint = CarrotColors.Accent,
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
@@ -640,6 +779,121 @@ private fun CategoriesModal(
 }
 
 @Composable
+private fun SearchModal(
+    activeTab: PdfTab?,
+    query: String,
+    isSearching: Boolean,
+    results: List<PdfSearchResult>,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onOpenResult: (PdfSearchResult) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Search PDF",
+                color = CarrotColors.TextPrimary
+            )
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = activeTab?.title ?: "Open a PDF before searching.",
+                    color = CarrotColors.TextMuted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    label = {
+                        Text("Search current PDF")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Button(
+                    onClick = onSearch,
+                    enabled = activeTab != null && query.isNotBlank() && !isSearching,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CarrotColors.Accent,
+                        contentColor = CarrotColors.Background
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isSearching) "Searching..." else "Search")
+                }
+
+                Text(
+                    text = when {
+                        isSearching -> "Scanning pages..."
+                        results.isEmpty() -> "No results yet"
+                        else -> "${results.size} result${if (results.size == 1) "" else "s"}"
+                    },
+                    color = CarrotColors.TextMuted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                results.take(6).forEach { result ->
+                    SearchResultRow(
+                        result = result,
+                        onClick = {
+                            onOpenResult(result)
+                        }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = "Close",
+                    color = CarrotColors.Accent
+                )
+            }
+        },
+        containerColor = CarrotColors.Surface
+    )
+}
+
+@Composable
+private fun SearchResultRow(
+    result: PdfSearchResult,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = CarrotColors.Background
+        ),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Text(
+                text = "Page ${result.pageIndex + 1}",
+                color = CarrotColors.Accent,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = result.snippet,
+                color = CarrotColors.TextSecondary,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
 private fun CategoryRow(
     category: PdfCategory,
     isSelected: Boolean,
@@ -666,10 +920,17 @@ private fun CategoryRow(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = category.name.take(1).uppercase(),
-                color = if (isSelected) CarrotColors.Background else CarrotColors.TextSecondary,
-                fontWeight = FontWeight.SemiBold
+            Icon(
+                painter = painterResource(
+                    if (category.id == PdfCategory.DEFAULT_ID) {
+                        R.drawable.ic_action_default
+                    } else {
+                        R.drawable.ic_action_book
+                    }
+                ),
+                contentDescription = category.name,
+                tint = if (isSelected) CarrotColors.Background else CarrotColors.Accent,
+                modifier = Modifier.size(20.dp)
             )
         }
 
