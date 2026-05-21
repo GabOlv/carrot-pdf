@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,9 +25,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.carrotpdf.R
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.ui.design.CarrotColors
 
@@ -108,22 +111,23 @@ fun PdfTabStrip(
                     Spacer(modifier = Modifier.width(8.dp))
 
                     if (isPinned) {
-                        Box(
-                            modifier = Modifier
-                                .size(5.dp)
-                                .background(CarrotColors.Accent)
+                        Icon(
+                            painter = painterResource(R.drawable.ic_carrot_pin),
+                            contentDescription = "Bookmarked",
+                            tint = androidx.compose.ui.graphics.Color.Unspecified,
+                            modifier = Modifier.size(15.dp)
                         )
 
                         Spacer(modifier = Modifier.width(8.dp))
                     }
 
-                    Text(
+                    Icon(
                         modifier = Modifier.clickable {
                             onCloseTab(tab.id)
-                        },
-                        text = "x",
-                        color = CarrotColors.TextMuted,
-                        style = MaterialTheme.typography.bodyMedium
+                        }.size(18.dp),
+                        painter = painterResource(R.drawable.ic_tab_close),
+                        contentDescription = "Close tab",
+                        tint = CarrotColors.TextMuted
                     )
                 }
 

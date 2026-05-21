@@ -10,7 +10,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,8 +76,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun CarrotPdfApp() {
-    val systemDarkTheme = isSystemInDarkTheme()
-    var isDarkTheme by remember { mutableStateOf(systemDarkTheme) }
+    var isDarkTheme by remember { mutableStateOf(true) }
 
     CarrotDesignTheme(
         darkTheme = isDarkTheme
@@ -399,7 +397,7 @@ private fun CarrotPdfContent(
                             val success = downloadPdf(context, tab.uri, tab.title)
                             Toast.makeText(
                                 context,
-                                if (success) "PDF baixado" else "Nao foi possivel baixar",
+                                if (success) "PDF downloaded" else "Could not download PDF",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -602,26 +600,26 @@ private fun ReaderSettingsModal(
             ) {
                 SettingsActionCard(
                     iconResId = R.drawable.ic_action_open_pdf,
-                    title = "Abrir PDF",
-                    subtitle = "Escolher um arquivo local",
+                    title = "Open PDF",
+                    subtitle = "Choose a local file",
                     onClick = onOpenPdf
                 )
                 SettingsActionCard(
                     iconResId = R.drawable.ic_action_share,
-                    title = "Enviar Arquivo",
-                    subtitle = "Compartilhar uma copia",
+                    title = "Share file",
+                    subtitle = "Send a copy to another app",
                     onClick = onSharePdf
                 )
                 SettingsActionCard(
                     iconResId = R.drawable.ic_action_download,
-                    title = "Baixar",
-                    subtitle = "Salvar uma copia local",
+                    title = "Download",
+                    subtitle = "Save a local copy",
                     onClick = onDownloadPdf
                 )
                 SettingsActionCard(
                     iconResId = R.drawable.ic_action_print,
-                    title = "Imprimir",
-                    subtitle = "Enviar para impressora",
+                    title = "Print",
+                    subtitle = "Send to a printer",
                     onClick = onPrintPdf
                 )
             }
@@ -653,9 +651,9 @@ private fun SettingsActionCard(
             .clickable { onClick() }
             .padding(vertical = 1.dp),
         colors = CardDefaults.cardColors(
-            containerColor = CarrotColors.Background
+            containerColor = CarrotColors.SurfaceAlt
         ),
-        shape = RoundedCornerShape(10.dp)
+        shape = RoundedCornerShape(14.dp)
     ) {
         Row(
             modifier = Modifier
@@ -665,10 +663,10 @@ private fun SettingsActionCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(38.dp)
                     .background(
                         color = CarrotColors.AccentSoft,
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -904,19 +902,19 @@ private fun CategoryRow(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                color = if (isSelected) CarrotColors.AccentSoft else CarrotColors.Background,
-                shape = RoundedCornerShape(10.dp)
+                color = if (isSelected) CarrotColors.AccentSoft else CarrotColors.SurfaceAlt,
+                shape = RoundedCornerShape(14.dp)
             )
             .clickable(enabled = isEnabled) { onClick() }
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier
-                .size(34.dp)
+                modifier = Modifier
+                .size(38.dp)
                 .background(
                     color = if (isSelected) CarrotColors.Accent else CarrotColors.SurfaceAlt,
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
