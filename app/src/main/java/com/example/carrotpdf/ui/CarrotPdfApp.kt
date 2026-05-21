@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,18 +43,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.R
 import com.example.carrotpdf.data.CarrotLibraryStore
 import com.example.carrotpdf.model.PdfBookmark
 import com.example.carrotpdf.model.PdfCategory
+import com.example.carrotpdf.model.PdfOpenTab
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
@@ -115,6 +119,17 @@ private fun CarrotPdfContent(
                     )
                 )
             }
+            initialLibrary.openTabs.forEach { openTab ->
+                if (none { tab -> tab.id == openTab.tabId }) {
+                    add(
+                        PdfTab(
+                            id = openTab.tabId,
+                            uri = Uri.parse(openTab.uri),
+                            title = openTab.title
+                        )
+                    )
+                }
+            }
         }
     }
     val categories = remember {
@@ -134,8 +149,20 @@ private fun CarrotPdfContent(
             addAll(initialLibrary.bookmarks.map { bookmark -> bookmark.tabId })
         }
     }
+    val temporaryTabOrder = remember {
+        mutableStateListOf<String>().apply {
+            addAll(initialLibrary.openTabs.map { tab -> tab.tabId })
+        }
+    }
 
     var activeTabId by remember { mutableStateOf(tabs.firstOrNull()?.id) }
+    var selectedCategoryId by remember {
+        mutableStateOf(
+            initialLibrary.selectedCategoryId.takeIf { categoryId ->
+                categoryId == PdfCategory.DEFAULT_ID || categories.any { it.id == categoryId }
+            } ?: PdfCategory.DEFAULT_ID
+        )
+    }
     var isFullscreenReader by remember { mutableStateOf(false) }
     var isSettingsModalOpen by remember { mutableStateOf(false) }
     var isCategoriesModalOpen by remember { mutableStateOf(false) }
@@ -143,7 +170,9 @@ private fun CarrotPdfContent(
     var categoryNameInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
-    var closeBookmarkedTabRequest by remember { mutableStateOf<PdfTab?>(null) }
+    var closeTabRequest by remember { mutableStateOf<PdfTab?>(null) }
+    var categoryDeleteRequest by remember { mutableStateOf<PdfCategory?>(null) }
+    var categoryDeleteInput by remember { mutableStateOf("") }
     val searchResults = remember { mutableStateListOf<PdfSearchResult>() }
 
     var isLoadingDocument by remember { mutableStateOf(false) }
@@ -152,9 +181,46 @@ private fun CarrotPdfContent(
     val activeViewerState = rememberActiveViewerState(activeTab)
     val displayedTabs = buildDisplayedTabs(
         tabs = tabs,
-        bookmarkedTabIds = bookmarkedTabCategories.keys,
-        pinnedTabOrder = pinnedTabOrder
+        bookmarkedTabCategories = bookmarkedTabCategories,
+        pinnedTabOrder = pinnedTabOrder,
+        temporaryTabOrder = temporaryTabOrder,
+        selectedCategoryId = selectedCategoryId,
+        activeTabId = activeTabId
     )
+
+    fun persistLibrary() {
+        val bookmarks = pinnedTabOrder.mapNotNull { tabId ->
+            val tab = tabs.firstOrNull { it.id == tabId } ?: return@mapNotNull null
+            val categoryId = bookmarkedTabCategories[tabId] ?: return@mapNotNull null
+
+            PdfBookmark(
+                tabId = tab.id,
+                uri = tab.uri.toString(),
+                title = tab.title,
+                categoryId = categoryId
+            )
+        }
+        val openTabs = temporaryTabOrder.mapNotNull { tabId ->
+            val tab = tabs.firstOrNull { it.id == tabId } ?: return@mapNotNull null
+
+            if (bookmarkedTabCategories.containsKey(tab.id)) {
+                return@mapNotNull null
+            }
+
+            PdfOpenTab(
+                tabId = tab.id,
+                uri = tab.uri.toString(),
+                title = tab.title
+            )
+        }
+
+        libraryStore.save(
+            categories = categories,
+            bookmarks = bookmarks,
+            openTabs = openTabs,
+            selectedCategoryId = selectedCategoryId
+        )
+    }
 
     val pdfPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -174,8 +240,18 @@ private fun CarrotPdfContent(
                     title = getPdfTitle(context, uri)
                 )
 
-                tabs.add(newTab)
-                activeTabId = newTab.id
+                val existingTab = tabs.firstOrNull { it.uri == uri }
+
+                if (existingTab != null) {
+                    activeTabId = existingTab.id
+                } else {
+                    tabs.add(newTab)
+                    temporaryTabOrder.add(newTab.id)
+                    activeTabId = newTab.id
+                }
+
+                selectedCategoryId = PdfCategory.DEFAULT_ID
+                persistLibrary()
                 isFullscreenReader = false
             }
         }
@@ -185,28 +261,12 @@ private fun CarrotPdfContent(
         pdfPicker.launch(arrayOf("application/pdf"))
     }
 
-    fun persistLibrary() {
-        val bookmarks = pinnedTabOrder.mapNotNull { tabId ->
-            val tab = tabs.firstOrNull { it.id == tabId } ?: return@mapNotNull null
-            val categoryId = bookmarkedTabCategories[tabId] ?: return@mapNotNull null
-
-            PdfBookmark(
-                tabId = tab.id,
-                uri = tab.uri.toString(),
-                title = tab.title,
-                categoryId = categoryId
-            )
-        }
-
-        libraryStore.save(
-            categories = categories,
-            bookmarks = bookmarks
-        )
-    }
-
     val removeBookmark: (String) -> Unit = { tabId ->
         bookmarkedTabCategories.remove(tabId)
         pinnedTabOrder.remove(tabId)
+        if (tabId !in temporaryTabOrder) {
+            temporaryTabOrder.add(tabId)
+        }
         persistLibrary()
     }
 
@@ -214,13 +274,17 @@ private fun CarrotPdfContent(
         val indexToRemove = tabs.indexOfFirst { it.id == tabId }
 
         if (indexToRemove >= 0) {
-            removeBookmark(tabId)
+            bookmarkedTabCategories.remove(tabId)
+            pinnedTabOrder.remove(tabId)
+            temporaryTabOrder.remove(tabId)
             tabs.removeAt(indexToRemove)
 
             if (activeTabId == tabId) {
                 activeTabId = tabs.getOrNull(indexToRemove)?.id
                     ?: tabs.getOrNull(indexToRemove - 1)?.id
             }
+
+            persistLibrary()
         }
     }
 
@@ -229,6 +293,7 @@ private fun CarrotPdfContent(
 
         if (tab != null) {
             bookmarkedTabCategories[tab.id] = categoryId
+            temporaryTabOrder.remove(tab.id)
 
             if (tab.id !in pinnedTabOrder) {
                 pinnedTabOrder.add(tab.id)
@@ -281,17 +346,16 @@ private fun CarrotPdfContent(
                         onCloseTab = { id ->
                             val tab = tabs.firstOrNull { it.id == id }
 
-                            if (tab != null && bookmarkedTabCategories.containsKey(id)) {
-                                closeBookmarkedTabRequest = tab
-                            } else {
-                                closeTab(id)
+                            if (tab != null) {
+                                closeTabRequest = tab
                             }
                         },
                         onMoveTab = { tabId, visibleIndex ->
                             moveDisplayedTab(
                                 tabs = tabs,
                                 pinnedTabOrder = pinnedTabOrder,
-                                bookmarkedTabIds = bookmarkedTabCategories.keys,
+                                temporaryTabOrder = temporaryTabOrder,
+                                bookmarkedTabCategories = bookmarkedTabCategories,
                                 displayedTabs = displayedTabs,
                                 tabId = tabId,
                                 targetVisibleIndex = visibleIndex
@@ -338,7 +402,7 @@ private fun CarrotPdfContent(
 
                             if (tab != null) {
                                 if (bookmarkedTabCategories.containsKey(tab.id)) {
-                                    closeBookmarkedTabRequest = tab
+                                    closeTabRequest = tab
                                 } else {
                                     isCategoriesModalOpen = true
                                 }
@@ -419,6 +483,7 @@ private fun CarrotPdfContent(
                 CategoriesModal(
                     activeTab = activeTab,
                     categories = categories,
+                    selectedCategoryId = selectedCategoryId,
                     bookmarkedCategoryId = activeTab?.id?.let { bookmarkedTabCategories[it] },
                     categoryNameInput = categoryNameInput,
                     onCategoryNameChange = { categoryNameInput = it },
@@ -428,15 +493,30 @@ private fun CarrotPdfContent(
                         if (name.isNotBlank()) {
                             val category = PdfCategory(name = name)
                             categories.add(category)
+                            selectedCategoryId = category.id
                             categoryNameInput = ""
-                            bookmarkActiveTab(category.id)
                             persistLibrary()
-                            isCategoriesModalOpen = false
                         }
                     },
                     onSelectCategory = { category ->
+                        selectedCategoryId = category.id
+                        activeTabId = displayedTabsForCategory(
+                            tabs = tabs,
+                            bookmarkedTabCategories = bookmarkedTabCategories,
+                            pinnedTabOrder = pinnedTabOrder,
+                            temporaryTabOrder = temporaryTabOrder,
+                            selectedCategoryId = category.id
+                        ).firstOrNull()?.id
+                        persistLibrary()
+                    },
+                    onBookmarkInCategory = { category ->
                         bookmarkActiveTab(category.id)
+                        selectedCategoryId = category.id
                         isCategoriesModalOpen = false
+                    },
+                    onRequestDeleteCategory = { category ->
+                        categoryDeleteRequest = category
+                        categoryDeleteInput = ""
                     },
                     onDismiss = {
                         isCategoriesModalOpen = false
@@ -478,15 +558,59 @@ private fun CarrotPdfContent(
                 )
             }
 
-            if (closeBookmarkedTabRequest != null) {
-                ConfirmRemoveBookmarkDialog(
-                    tab = closeBookmarkedTabRequest,
+            if (closeTabRequest != null) {
+                ConfirmCloseTabDialog(
+                    tab = closeTabRequest,
+                    isBookmarked = closeTabRequest?.id?.let { bookmarkedTabCategories.containsKey(it) } == true,
                     onConfirm = { tab ->
-                        closeBookmarkedTabRequest = null
+                        closeTabRequest = null
                         closeTab(tab.id)
                     },
                     onDismiss = {
-                        closeBookmarkedTabRequest = null
+                        closeTabRequest = null
+                    }
+                )
+            }
+
+            if (categoryDeleteRequest != null) {
+                ConfirmDeleteCategoryDialog(
+                    category = categoryDeleteRequest,
+                    input = categoryDeleteInput,
+                    onInputChange = { categoryDeleteInput = it },
+                    onConfirm = { category ->
+                        val removedTabIds = bookmarkedTabCategories
+                            .filterValues { it == category.id }
+                            .keys
+                            .toSet()
+
+                        categories.removeAll { it.id == category.id }
+                        removedTabIds.forEach { tabId ->
+                            bookmarkedTabCategories.remove(tabId)
+                            pinnedTabOrder.remove(tabId)
+                        }
+                        tabs.removeAll { tab -> tab.id in removedTabIds }
+
+                        if (selectedCategoryId == category.id) {
+                            selectedCategoryId = PdfCategory.DEFAULT_ID
+                        }
+
+                        if (activeTabId in removedTabIds) {
+                            activeTabId = displayedTabsForCategory(
+                                tabs = tabs,
+                                bookmarkedTabCategories = bookmarkedTabCategories,
+                                pinnedTabOrder = pinnedTabOrder,
+                                temporaryTabOrder = temporaryTabOrder,
+                                selectedCategoryId = selectedCategoryId
+                            ).firstOrNull()?.id
+                        }
+
+                        categoryDeleteRequest = null
+                        categoryDeleteInput = ""
+                        persistLibrary()
+                    },
+                    onDismiss = {
+                        categoryDeleteRequest = null
+                        categoryDeleteInput = ""
                     }
                 )
             }
@@ -701,13 +825,20 @@ private fun SettingsActionCard(
 private fun CategoriesModal(
     activeTab: PdfTab?,
     categories: List<PdfCategory>,
+    selectedCategoryId: String,
     bookmarkedCategoryId: String?,
     categoryNameInput: String,
     onCategoryNameChange: (String) -> Unit,
     onCreateCategory: () -> Unit,
     onSelectCategory: (PdfCategory) -> Unit,
+    onBookmarkInCategory: (PdfCategory) -> Unit,
+    onRequestDeleteCategory: (PdfCategory) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val visibleCategories = categories.filterNot { it.id == PdfCategory.DEFAULT_ID }
+    val selectedCategory = categories.firstOrNull { it.id == selectedCategoryId }
+        ?: PdfCategory.Default
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -718,23 +849,38 @@ private fun CategoriesModal(
         },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = activeTab?.title ?: "Open a PDF before bookmarking.",
+                    text = "Showing ${if (selectedCategory.id == PdfCategory.DEFAULT_ID) "(default)" else selectedCategory.name}",
                     color = CarrotColors.TextMuted,
                     style = MaterialTheme.typography.bodySmall
                 )
 
-                categories.forEach { category ->
-                    val isSelected = category.id == bookmarkedCategoryId
+                DefaultCategoryRow(
+                    isSelected = selectedCategoryId == PdfCategory.DEFAULT_ID,
+                    onClick = {
+                        onSelectCategory(PdfCategory.Default)
+                    }
+                )
+
+                visibleCategories.forEach { category ->
+                    val isSelected = category.id == selectedCategoryId
 
                     CategoryRow(
                         category = category,
                         isSelected = isSelected,
-                        isEnabled = activeTab != null,
+                        isBookmarkedHere = category.id == bookmarkedCategoryId,
+                        isEnabled = true,
                         onClick = {
                             onSelectCategory(category)
+                        },
+                        onBookmarkClick = {
+                            onBookmarkInCategory(category)
+                        },
+                        onDeleteClick = {
+                            onRequestDeleteCategory(category)
                         }
                     )
                 }
@@ -751,14 +897,29 @@ private fun CategoriesModal(
 
                 Button(
                     onClick = onCreateCategory,
-                    enabled = activeTab != null && categoryNameInput.isNotBlank(),
+                    enabled = categoryNameInput.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = CarrotColors.Accent,
                         contentColor = CarrotColors.Background
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Create and bookmark")
+                    Text("Create category")
+                }
+
+                if (activeTab != null && selectedCategoryId != PdfCategory.DEFAULT_ID) {
+                    Button(
+                        onClick = {
+                            onBookmarkInCategory(selectedCategory)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CarrotColors.Accent,
+                            contentColor = CarrotColors.Background
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Bookmark active PDF here")
+                    }
                 }
             }
         },
@@ -895,8 +1056,11 @@ private fun SearchResultRow(
 private fun CategoryRow(
     category: PdfCategory,
     isSelected: Boolean,
+    isBookmarkedHere: Boolean,
     isEnabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onBookmarkClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -934,18 +1098,86 @@ private fun CategoryRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        Text(
-            text = category.name,
-            color = if (isSelected) CarrotColors.Accent else CarrotColors.TextPrimary,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-        )
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = category.name,
+                color = if (isSelected) CarrotColors.Accent else CarrotColors.TextPrimary,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+            )
+            if (isBookmarkedHere) {
+                Text(
+                    text = "Active PDF is bookmarked here",
+                    color = CarrotColors.TextMuted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
+        TextButton(onClick = onBookmarkClick) {
+            Text(
+                text = "Save",
+                color = CarrotColors.Accent
+            )
+        }
+
+        TextButton(onClick = onDeleteClick) {
+            Text(
+                text = "Delete",
+                color = CarrotColors.TextMuted
+            )
+        }
     }
 }
 
 @Composable
-private fun ConfirmRemoveBookmarkDialog(
+private fun DefaultCategoryRow(
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = if (isSelected) CarrotColors.AccentSoft else CarrotColors.SurfaceAlt,
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable { onClick() }
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_action_default),
+            contentDescription = "Default",
+            tint = CarrotColors.Accent,
+            modifier = Modifier.size(22.dp)
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column {
+            Text(
+                text = "(default)",
+                color = if (isSelected) CarrotColors.Accent else CarrotColors.TextPrimary,
+                style = MaterialTheme.typography.bodyLarge,
+                fontStyle = FontStyle.Italic,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+            )
+            Text(
+                text = "Loose opened PDFs live here",
+                color = CarrotColors.TextMuted,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfirmCloseTabDialog(
     tab: PdfTab?,
+    isBookmarked: Boolean,
     onConfirm: (PdfTab) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -957,13 +1189,17 @@ private fun ConfirmRemoveBookmarkDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Remove bookmark?",
+                text = "Close tab?",
                 color = CarrotColors.TextPrimary
             )
         },
         text = {
             Text(
-                text = "${tab.title} will be removed from bookmarks and closed.",
+                text = if (isBookmarked) {
+                    "${tab.title} will be closed and removed from bookmarks."
+                } else {
+                    "${tab.title} will be closed from the current workspace."
+                },
                 color = CarrotColors.TextSecondary
             )
         },
@@ -974,7 +1210,7 @@ private fun ConfirmRemoveBookmarkDialog(
                 }
             ) {
                 Text(
-                    text = "Remove",
+                    text = "Close",
                     color = CarrotColors.Accent
                 )
             }
@@ -983,6 +1219,71 @@ private fun ConfirmRemoveBookmarkDialog(
             TextButton(
                 onClick = onDismiss
             ) {
+                Text(
+                    text = "Cancel",
+                    color = CarrotColors.TextSecondary
+                )
+            }
+        },
+        containerColor = CarrotColors.Surface
+    )
+}
+
+@Composable
+private fun ConfirmDeleteCategoryDialog(
+    category: PdfCategory?,
+    input: String,
+    onInputChange: (String) -> Unit,
+    onConfirm: (PdfCategory) -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (category == null) {
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Delete category?",
+                color = CarrotColors.TextPrimary
+            )
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Type ${category.name} exactly. The PDFs stay on disk, but the category tabs and bookmarks will be removed.",
+                    color = CarrotColors.TextSecondary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = onInputChange,
+                    label = {
+                        Text("Category name")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = input == category.name,
+                onClick = {
+                    onConfirm(category)
+                }
+            ) {
+                Text(
+                    text = "Delete",
+                    color = CarrotColors.Accent
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
                 Text(
                     text = "Cancel",
                     color = CarrotColors.TextSecondary
@@ -1023,22 +1324,46 @@ private fun updateActiveTab(
 
 private fun buildDisplayedTabs(
     tabs: List<PdfTab>,
-    bookmarkedTabIds: Set<String>,
-    pinnedTabOrder: List<String>
+    bookmarkedTabCategories: Map<String, String>,
+    pinnedTabOrder: List<String>,
+    temporaryTabOrder: List<String>,
+    selectedCategoryId: String,
+    activeTabId: String?
 ): List<PdfTab> {
-    val pinnedTabs = pinnedTabOrder
+    val scopedBookmarkedTabs = pinnedTabOrder
         .mapNotNull { tabId -> tabs.firstOrNull { tab -> tab.id == tabId } }
-        .filter { tab -> tab.id in bookmarkedTabIds }
-    val pinnedIds = pinnedTabs.mapTo(mutableSetOf()) { tab -> tab.id }
-    val regularTabs = tabs.filterNot { tab -> tab.id in pinnedIds }
+        .filter { tab -> bookmarkedTabCategories[tab.id] == selectedCategoryId }
+    val temporaryTabs = if (selectedCategoryId == PdfCategory.DEFAULT_ID) {
+        temporaryTabOrder.mapNotNull { tabId -> tabs.firstOrNull { tab -> tab.id == tabId } }
+    } else {
+        tabs.filter { tab -> tab.id == activeTabId && !bookmarkedTabCategories.containsKey(tab.id) }
+    }
 
-    return pinnedTabs + regularTabs
+    return scopedBookmarkedTabs + temporaryTabs
+}
+
+private fun displayedTabsForCategory(
+    tabs: List<PdfTab>,
+    bookmarkedTabCategories: Map<String, String>,
+    pinnedTabOrder: List<String>,
+    temporaryTabOrder: List<String>,
+    selectedCategoryId: String
+): List<PdfTab> {
+    return buildDisplayedTabs(
+        tabs = tabs,
+        bookmarkedTabCategories = bookmarkedTabCategories,
+        pinnedTabOrder = pinnedTabOrder,
+        temporaryTabOrder = temporaryTabOrder,
+        selectedCategoryId = selectedCategoryId,
+        activeTabId = null
+    )
 }
 
 private fun moveDisplayedTab(
     tabs: MutableList<PdfTab>,
     pinnedTabOrder: MutableList<String>,
-    bookmarkedTabIds: Set<String>,
+    temporaryTabOrder: MutableList<String>,
+    bookmarkedTabCategories: Map<String, String>,
     displayedTabs: List<PdfTab>,
     tabId: String,
     targetVisibleIndex: Int
@@ -1049,14 +1374,25 @@ private fun moveDisplayedTab(
 
     val safeTarget = targetVisibleIndex.coerceIn(0, displayedTabs.lastIndex)
 
-    if (tabId in bookmarkedTabIds) {
+    if (bookmarkedTabCategories.containsKey(tabId)) {
         val pinnedIds = displayedTabs
-            .filter { tab -> tab.id in bookmarkedTabIds }
+            .filter { tab -> bookmarkedTabCategories.containsKey(tab.id) }
             .map { tab -> tab.id }
         val safePinnedTarget = safeTarget.coerceIn(0, (pinnedIds.size - 1).coerceAtLeast(0))
 
         pinnedTabOrder.remove(tabId)
         pinnedTabOrder.add(safePinnedTarget, tabId)
+        return
+    }
+
+    if (tabId in temporaryTabOrder) {
+        val temporaryIds = displayedTabs
+            .filter { tab -> tab.id in temporaryTabOrder }
+            .map { tab -> tab.id }
+        val safeTemporaryTarget = safeTarget.coerceIn(0, (temporaryIds.size - 1).coerceAtLeast(0))
+
+        temporaryTabOrder.remove(tabId)
+        temporaryTabOrder.add(safeTemporaryTarget, tabId)
         return
     }
 
