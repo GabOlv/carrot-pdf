@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -14,11 +15,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +29,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,10 +64,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -120,8 +128,9 @@ private fun CarrotPdfContent() {
     }
 
     fun hideChromeForReading() {
-        closeSearch()
-        isChromeVisible = false
+        if (!isSearchVisible) {
+            isChromeVisible = false
+        }
     }
 
     fun openTab(uri: Uri, title: String) {
@@ -181,6 +190,11 @@ private fun CarrotPdfContent() {
     )
     val openPdf = {
         pdfPicker.launch(arrayOf("application/pdf"))
+    }
+
+    BackHandler(enabled = isSearchVisible) {
+        closeSearch()
+        isChromeVisible = true
     }
 
     LaunchedEffect(activeTabId) {
@@ -252,11 +266,19 @@ private fun CarrotPdfContent() {
                 isLoadingDocument = isLoadingDocument,
                 searchResults = searchResults,
                 activeSearchResultIndex = activeSearchResultIndex,
+                pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, onScrollToPage ->
+                    DrivePageIndicator(
+                        currentPage = currentPage,
+                        pageCount = pageCount,
+                        isScrollInProgress = isScrollInProgress,
+                        onScrollToPage = onScrollToPage,
+                        modifier = Modifier.align(Alignment.CenterEnd)
+                    )
+                },
                 onOpenPdf = openPdf,
                 onToggleChrome = {
-                    isChromeVisible = !isChromeVisible
-                    if (!isChromeVisible) {
-                        closeSearch()
+                    if (!isSearchVisible) {
+                        isChromeVisible = !isChromeVisible
                     }
                 },
                 onRevealChrome = {
@@ -284,7 +306,7 @@ private fun CarrotPdfContent() {
             )
 
             AnimatedVisibility(
-                visible = isChromeVisible,
+                visible = isChromeVisible && !isSearchVisible,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter)
@@ -311,12 +333,12 @@ private fun CarrotPdfContent() {
             }
 
             AnimatedVisibility(
-                visible = isChromeVisible && isSearchVisible,
+                visible = isSearchVisible,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = TOP_BAR_HEIGHT, start = 12.dp, end = 12.dp)
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
                 ReaderSearchOverlay(
                     query = searchQuery,
@@ -357,7 +379,7 @@ private fun CarrotPdfContent() {
             }
 
             AnimatedVisibility(
-                visible = isChromeVisible && activeTab != null,
+                visible = (isChromeVisible || isSearchVisible) && activeTab != null,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
@@ -398,11 +420,19 @@ private fun CarrotPdfContent() {
             }
 
             if (isOverflowOpen) {
-                ReaderMenuDialog(
+                ReaderMenuPopup(
                     hasDocument = activeTab != null,
                     onOpenPdf = {
                         isOverflowOpen = false
                         openPdf()
+                    },
+                    onGoToPage = {
+                        isOverflowOpen = false
+                        Toast.makeText(
+                            context,
+                            "Go to page will come next.",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     },
                     onSharePdf = {
                         val tab = activeTab
@@ -446,6 +476,12 @@ private fun ReaderStage(
     isLoadingDocument: Boolean,
     searchResults: List<PdfSearchResult>,
     activeSearchResultIndex: Int,
+    pageIndicatorContent: @Composable BoxScope.(
+        currentPage: Int,
+        pageCount: Int,
+        isScrollInProgress: Boolean,
+        onScrollToPage: (Int) -> Unit
+    ) -> Unit,
     onOpenPdf: () -> Unit,
     onToggleChrome: () -> Unit,
     onRevealChrome: () -> Unit,
@@ -486,7 +522,15 @@ private fun ReaderStage(
                     onZoomCommitted = onZoomCommitted,
                     searchResults = searchResults,
                     activeSearchResultIndex = activeSearchResultIndex,
-                    onUserInteraction = onUserInteraction
+                    onUserInteraction = onUserInteraction,
+                    pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, onScrollToPage ->
+                        pageIndicatorContent(
+                            currentPage,
+                            pageCount,
+                            isScrollInProgress,
+                            onScrollToPage
+                        )
+                    }
                 )
             }
         }
@@ -513,8 +557,8 @@ private fun ReaderTopBar(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xF20B0D10),
-                        Color(0xDD10141A)
+                        Color(0xF70B0D10),
+                        Color(0xEE11151A)
                     )
                 )
             )
@@ -523,7 +567,7 @@ private fun ReaderTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 16.dp),
+                .padding(start = 14.dp, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButtonCanvas(
@@ -553,7 +597,7 @@ private fun ReaderTopBar(
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
             )
@@ -581,28 +625,16 @@ private fun ReaderTopBar(
                 contentDescription = "Tabs",
                 onClick = onTabs
             ) {
-                drawRoundRect(
-                    color = Color.White,
-                    topLeft = Offset(5.dp.toPx(), 6.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(13.dp.toPx(), 12.dp.toPx()),
-                    style = Stroke(width = 2.dp.toPx()),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                )
-                drawRoundRect(
-                    color = Color.White,
-                    topLeft = Offset(8.dp.toPx(), 3.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(13.dp.toPx(), 12.dp.toPx()),
-                    style = Stroke(width = 2.dp.toPx()),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                )
+                drawSimpleCarrotTabsIcon(tabCount = tabCount)
             }
 
             Box(
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(20.dp)
+                    .offset(x = (-8).dp, y = 8.dp)
                     .background(
                         color = Color(0xFF33383F),
-                        shape = RoundedCornerShape(11.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -631,9 +663,131 @@ private fun ReaderTopBar(
         Box(
             modifier = Modifier
                 .height(3.dp)
-                .width(96.dp)
+                .width(86.dp)
                 .background(CarrotColors.Accent)
         )
+    }
+}
+
+@Composable
+private fun BoxScope.DrivePageIndicator(
+    currentPage: Int,
+    pageCount: Int,
+    isScrollInProgress: Boolean,
+    onScrollToPage: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    var isDragging by remember { mutableStateOf(false) }
+    var thumbCenterY by remember { mutableFloatStateOf(0f) }
+    var isVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentPage, pageCount, isScrollInProgress, isDragging) {
+        if (isScrollInProgress || isDragging) {
+            isVisible = true
+            return@LaunchedEffect
+        }
+
+        isVisible = true
+        delay(PAGE_INDICATOR_VISIBLE_MS)
+        isVisible = false
+    }
+
+    AnimatedVisibility(
+        visible = isVisible || isDragging,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = modifier
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .heightIn(min = 220.dp)
+                .width(100.dp)
+                .padding(end = 10.dp)
+        ) {
+            val heightPx = with(density) { maxHeight.toPx() }
+            val handleHalfHeightPx = with(density) { 22.dp.toPx() }
+            val pageFraction = if (pageCount <= 1) {
+                0f
+            } else {
+                (currentPage - 1).toFloat() / (pageCount - 1)
+            }
+            val targetCenterY = (heightPx * pageFraction).coerceIn(
+                handleHalfHeightPx,
+                heightPx - handleHalfHeightPx
+            )
+
+            LaunchedEffect(targetCenterY, isDragging) {
+                if (!isDragging) {
+                    thumbCenterY = targetCenterY
+                }
+            }
+
+            fun scrollToThumbPosition(centerY: Float) {
+                val clampedY = centerY.coerceIn(
+                    handleHalfHeightPx,
+                    heightPx - handleHalfHeightPx
+                )
+                thumbCenterY = clampedY
+
+                val targetPage = if (heightPx <= 0f || pageCount <= 1) {
+                    0
+                } else {
+                    ((clampedY / heightPx) * (pageCount - 1))
+                        .roundToInt()
+                        .coerceIn(0, pageCount - 1)
+                }
+
+                onScrollToPage(targetPage)
+            }
+
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(y = with(density) { (thumbCenterY - handleHalfHeightPx).toDp() })
+                    .pointerInput(pageCount, heightPx) {
+                        detectVerticalDragGestures(
+                            onDragStart = {
+                                isDragging = true
+                            },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                scrollToThumbPosition(thumbCenterY + dragAmount)
+                            },
+                            onDragEnd = {
+                                isDragging = false
+                            },
+                            onDragCancel = {
+                                isDragging = false
+                            }
+                        )
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$currentPage / $pageCount",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .background(
+                            color = Color(0xDD1D2025),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .padding(horizontal = 11.dp, vertical = 7.dp)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(width = 5.dp, height = 44.dp)
+                        .background(
+                            color = CarrotColors.Accent,
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                )
+            }
+        }
     }
 }
 
@@ -651,11 +805,11 @@ private fun ReaderSearchOverlay(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(TOP_BAR_HEIGHT)
             .background(
-                color = Color(0xF20F1217),
-                shape = RoundedCornerShape(18.dp)
+                color = Color(0xF70B0D10)
             )
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(start = 8.dp, end = 8.dp, top = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         TextButton(onClick = onClose) {
@@ -680,11 +834,11 @@ private fun ReaderSearchOverlay(
             text = when {
                 isSearching -> "..."
                 resultCount == 0 -> "0"
-                else -> "${activeResultIndex + 1} of $resultCount"
+                else -> "${activeResultIndex + 1} / $resultCount"
             },
             color = CarrotColors.TextSecondary,
             style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(horizontal = 8.dp)
+            modifier = Modifier.padding(horizontal = 10.dp)
         )
 
         TextButton(
@@ -723,14 +877,28 @@ private fun TabSwitcherDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                text = "Open PDFs",
-                color = CarrotColors.TextPrimary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Abas abertas",
+                    color = CarrotColors.TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { }) {
+                    Text(
+                        text = "Editar",
+                        color = CarrotColors.Accent
+                    )
+                }
+            }
         },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
                 if (tabs.isEmpty()) {
                     Text(
@@ -740,8 +908,7 @@ private fun TabSwitcherDialog(
                 }
 
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.height(280.dp)
+                    modifier = Modifier.heightIn(max = 340.dp)
                 ) {
                     items(
                         items = tabs,
@@ -759,16 +926,39 @@ private fun TabSwitcherDialog(
                         )
                     }
                 }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .height(52.dp)
+                        .border(
+                            width = 1.dp,
+                            color = CarrotColors.Accent.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable { onOpenPdf() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "+",
+                            color = CarrotColors.Accent,
+                            style = MaterialTheme.typography.headlineSmall
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Abrir novo PDF",
+                            color = CarrotColors.TextPrimary,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
             }
         },
-        confirmButton = {
-            TextButton(onClick = onOpenPdf) {
-                Text(
-                    text = "Open PDF",
-                    color = CarrotColors.Accent
-                )
-            }
-        },
+        confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(
@@ -777,7 +967,8 @@ private fun TabSwitcherDialog(
                 )
             }
         },
-        containerColor = CarrotColors.Surface
+        containerColor = Color(0xF51A1D22),
+        shape = RoundedCornerShape(24.dp)
     )
 }
 
@@ -793,19 +984,28 @@ private fun TabSwitcherRow(
             .fillMaxWidth()
             .clickable { onSelect() },
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive) CarrotColors.AccentSoft else CarrotColors.SurfaceAlt
+            containerColor = if (isActive) Color(0x33FF7A1A) else Color.Transparent
         ),
-        shape = RoundedCornerShape(14.dp)
+        shape = RoundedCornerShape(10.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .border(
+                    width = if (isActive) 1.dp else 0.dp,
+                    color = if (isActive) CarrotColors.Accent else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp)
+                )
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            PdfFileGlyph()
+
+            Spacer(modifier = Modifier.width(12.dp))
+
             Text(
                 text = tab.title,
-                color = if (isActive) CarrotColors.Accent else CarrotColors.TextPrimary,
+                color = CarrotColors.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyLarge,
@@ -815,72 +1015,105 @@ private fun TabSwitcherRow(
 
             TextButton(onClick = onClose) {
                 Text(
-                    text = "Close",
+                    text = "x",
                     color = CarrotColors.TextMuted
                 )
             }
+
+            Text(
+                text = "⋮⋮",
+                color = CarrotColors.TextMuted,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }
 
 @Composable
-private fun ReaderMenuDialog(
+private fun ReaderMenuPopup(
     hasDocument: Boolean,
     onOpenPdf: () -> Unit,
+    onGoToPage: () -> Unit,
     onSharePdf: () -> Unit,
     onDownloadPdf: () -> Unit,
     onPrintPdf: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "PDF options",
-                color = CarrotColors.TextPrimary
-            )
-        },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MenuAction("Open PDF", onOpenPdf)
-                MenuAction("Share", onSharePdf, enabled = hasDocument)
-                MenuAction("Download", onDownloadPdf, enabled = hasDocument)
-                MenuAction("Print", onPrintPdf, enabled = hasDocument)
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(
-                    text = "Close",
-                    color = CarrotColors.Accent
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.TopEnd
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(top = TOP_BAR_HEIGHT + 2.dp, end = 12.dp)
+                .width(248.dp)
+                .background(
+                    color = Color(0xF51D2025),
+                    shape = RoundedCornerShape(16.dp)
                 )
-            }
-        },
-        containerColor = CarrotColors.Surface
-    )
+                .padding(vertical = 10.dp)
+        ) {
+            MenuAction(
+                text = "Abrir PDF",
+                icon = MenuIcon.Folder,
+                onClick = onOpenPdf
+            )
+            MenuAction(
+                text = "Ir para página",
+                icon = MenuIcon.PageNumber,
+                onClick = onGoToPage,
+                enabled = hasDocument
+            )
+            MenuDivider()
+            MenuAction(
+                text = "Compartilhar",
+                icon = MenuIcon.Share,
+                onClick = onSharePdf,
+                enabled = hasDocument
+            )
+            MenuAction(
+                text = "Baixar",
+                icon = MenuIcon.Download,
+                onClick = onDownloadPdf,
+                enabled = hasDocument
+            )
+            MenuAction(
+                text = "Imprimir",
+                icon = MenuIcon.Print,
+                onClick = onPrintPdf,
+                enabled = hasDocument
+            )
+        }
+    }
 }
 
 @Composable
 private fun MenuAction(
     text: String,
+    icon: MenuIcon,
     onClick: () -> Unit,
     enabled: Boolean = true
 ) {
-    Text(
-        text = text,
-        color = if (enabled) CarrotColors.TextPrimary else CarrotColors.TextMuted,
-        style = MaterialTheme.typography.bodyLarge,
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                color = CarrotColors.SurfaceAlt,
-                shape = RoundedCornerShape(14.dp)
-            )
             .clickable(enabled = enabled) { onClick() }
-            .padding(14.dp)
-    )
+            .padding(horizontal = 18.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MenuIconCanvas(
+            icon = icon,
+            color = if (enabled) Color.White else CarrotColors.TextMuted
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = text,
+            color = if (enabled) Color.White else CarrotColors.TextMuted,
+            style = MaterialTheme.typography.bodyLarge
+        )
+    }
 }
 
 @Composable
@@ -936,6 +1169,112 @@ private fun FloatingAnnotationButton(
 }
 
 @Composable
+private fun PdfFileGlyph() {
+    Box(
+        modifier = Modifier
+            .size(width = 24.dp, height = 30.dp)
+            .background(
+                color = Color.White,
+                shape = RoundedCornerShape(3.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "PDF",
+            color = Color(0xFFFF3B30),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun MenuDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 7.dp)
+            .height(1.dp)
+            .background(Color.White.copy(alpha = 0.13f))
+    )
+}
+
+@Composable
+private fun MenuIconCanvas(
+    icon: MenuIcon,
+    color: Color
+) {
+    Canvas(modifier = Modifier.size(24.dp)) {
+        val stroke = 1.8.dp.toPx()
+
+        when (icon) {
+            MenuIcon.Folder -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(3.dp.toPx(), 7.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(18.dp.toPx(), 12.dp.toPx()),
+                    style = Stroke(width = stroke),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                )
+                drawLine(
+                    color = color,
+                    start = Offset(4.dp.toPx(), 8.dp.toPx()),
+                    end = Offset(9.dp.toPx(), 8.dp.toPx()),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round
+                )
+            }
+
+            MenuIcon.PageNumber -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(5.dp.toPx(), 4.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(14.dp.toPx(), 16.dp.toPx()),
+                    style = Stroke(width = stroke),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                )
+                drawLine(color, Offset(9.dp.toPx(), 8.dp.toPx()), Offset(15.dp.toPx(), 8.dp.toPx()), stroke, StrokeCap.Round)
+                drawLine(color, Offset(9.dp.toPx(), 12.dp.toPx()), Offset(15.dp.toPx(), 12.dp.toPx()), stroke, StrokeCap.Round)
+                drawLine(color, Offset(9.dp.toPx(), 16.dp.toPx()), Offset(13.dp.toPx(), 16.dp.toPx()), stroke, StrokeCap.Round)
+            }
+
+            MenuIcon.Share -> {
+                drawCircle(color = color, radius = 2.4.dp.toPx(), center = Offset(7.dp.toPx(), 12.dp.toPx()), style = Stroke(width = stroke))
+                drawCircle(color = color, radius = 2.4.dp.toPx(), center = Offset(16.dp.toPx(), 7.dp.toPx()), style = Stroke(width = stroke))
+                drawCircle(color = color, radius = 2.4.dp.toPx(), center = Offset(16.dp.toPx(), 17.dp.toPx()), style = Stroke(width = stroke))
+                drawLine(color, Offset(9.dp.toPx(), 11.dp.toPx()), Offset(14.dp.toPx(), 8.dp.toPx()), stroke, StrokeCap.Round)
+                drawLine(color, Offset(9.dp.toPx(), 13.dp.toPx()), Offset(14.dp.toPx(), 16.dp.toPx()), stroke, StrokeCap.Round)
+            }
+
+            MenuIcon.Download -> {
+                drawLine(color, Offset(12.dp.toPx(), 4.dp.toPx()), Offset(12.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
+                drawLine(color, Offset(8.dp.toPx(), 11.dp.toPx()), Offset(12.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
+                drawLine(color, Offset(16.dp.toPx(), 11.dp.toPx()), Offset(12.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
+                drawLine(color, Offset(6.dp.toPx(), 20.dp.toPx()), Offset(18.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
+            }
+
+            MenuIcon.Print -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(6.dp.toPx(), 4.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(12.dp.toPx(), 6.dp.toPx()),
+                    style = Stroke(width = stroke),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx())
+                )
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(4.dp.toPx(), 10.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 8.dp.toPx()),
+                    style = Stroke(width = stroke),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                )
+                drawLine(color, Offset(8.dp.toPx(), 18.dp.toPx()), Offset(16.dp.toPx(), 18.dp.toPx()), stroke, StrokeCap.Round)
+            }
+        }
+    }
+}
+
+@Composable
 private fun IconButtonCanvas(
     contentDescription: String,
     onClick: () -> Unit,
@@ -953,6 +1292,41 @@ private fun IconButtonCanvas(
             onDraw = drawIcon
         )
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSimpleCarrotTabsIcon(
+    tabCount: Int
+) {
+    val accent = Color(0xFFFF7A1A)
+    drawRoundRect(
+        color = accent,
+        topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
+        size = androidx.compose.ui.geometry.Size(18.dp.toPx(), 18.dp.toPx()),
+        style = Stroke(width = 2.dp.toPx()),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
+    )
+    drawLine(accent, Offset(9.dp.toPx(), 16.dp.toPx()), Offset(15.dp.toPx(), 8.dp.toPx()), 2.2.dp.toPx(), StrokeCap.Round)
+    drawLine(accent, Offset(15.dp.toPx(), 8.dp.toPx()), Offset(18.dp.toPx(), 11.dp.toPx()), 2.2.dp.toPx(), StrokeCap.Round)
+    drawLine(Color(0xFF6DD36E), Offset(16.dp.toPx(), 7.dp.toPx()), Offset(20.dp.toPx(), 4.dp.toPx()), 1.8.dp.toPx(), StrokeCap.Round)
+    drawLine(Color(0xFF6DD36E), Offset(18.dp.toPx(), 8.dp.toPx()), Offset(22.dp.toPx(), 7.dp.toPx()), 1.8.dp.toPx(), StrokeCap.Round)
+
+    if (tabCount > 1) {
+        drawRoundRect(
+            color = Color.White.copy(alpha = 0.7f),
+            topLeft = Offset(0.dp.toPx(), 0.dp.toPx()),
+            size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 16.dp.toPx()),
+            style = Stroke(width = 1.3.dp.toPx()),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
+        )
+    }
+}
+
+private enum class MenuIcon {
+    Folder,
+    PageNumber,
+    Share,
+    Download,
+    Print
 }
 
 @Composable
@@ -1127,6 +1501,7 @@ private tailrec fun Context.findActivity(): Activity? {
     }
 }
 
-private val TOP_BAR_HEIGHT = 76.dp
+private val TOP_BAR_HEIGHT = 56.dp
 private const val SEARCH_DEBOUNCE_MS = 320L
 private const val EDGE_REVEAL_DISTANCE_PX = 18f
+private const val PAGE_INDICATOR_VISIBLE_MS = 1200L
