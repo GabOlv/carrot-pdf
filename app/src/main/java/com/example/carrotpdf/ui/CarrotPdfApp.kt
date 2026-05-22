@@ -18,7 +18,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.text.BasicTextField
@@ -71,6 +70,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -101,6 +101,7 @@ import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 fun CarrotPdfApp() {
@@ -1316,39 +1317,74 @@ private fun TabSwitcherRow(
                 modifier = Modifier
                     .size(width = 40.dp, height = 44.dp)
                     .pointerInput(tab.id) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown(
+                                    requireUnconsumed = false,
+                                    pass = PointerEventPass.Initial
+                                )
+                                down.consume()
+                                var lastY = down.position.y
+                                var wasReleased = false
+
+                                val releasedBeforeHold = withTimeoutOrNull(TAB_REORDER_HOLD_MS) {
+                                    while (true) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: return@withTimeoutOrNull true
+
+                                        if (change.changedToUpIgnoreConsumed()) {
+                                            return@withTimeoutOrNull true
+                                        }
+
+                                        lastY = change.position.y
+                                        change.consume()
+                                    }
+                                } == true
+
+                                if (releasedBeforeHold) {
+                                    continue
+                                }
+
                                 isReordering = true
                                 accumulatedDrag = 0f
                                 visualDragOffset = 0f
-                            },
-                            onDragCancel = {
-                                isReordering = false
-                                accumulatedDrag = 0f
-                                visualDragOffset = 0f
-                            },
-                            onDragEnd = {
-                                isReordering = false
-                                accumulatedDrag = 0f
-                                visualDragOffset = 0f
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                accumulatedDrag += dragAmount.y
-                                visualDragOffset = (visualDragOffset + dragAmount.y)
-                                    .coerceIn(-reorderThresholdPx, reorderThresholdPx)
 
-                                if (accumulatedDrag > reorderThresholdPx) {
-                                    onMove(1)
-                                    accumulatedDrag = 0f
-                                    visualDragOffset = 0f
-                                } else if (accumulatedDrag < -reorderThresholdPx) {
-                                    onMove(-1)
-                                    accumulatedDrag = 0f
-                                    visualDragOffset = 0f
+                                while (!wasReleased) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: break
+
+                                    if (change.changedToUpIgnoreConsumed()) {
+                                        wasReleased = true
+                                        break
+                                    }
+
+                                    val currentY = change.position.y
+                                    val deltaY = currentY - lastY
+                                    lastY = currentY
+
+                                    change.consume()
+                                    accumulatedDrag += deltaY
+                                    visualDragOffset = (visualDragOffset + deltaY)
+                                        .coerceIn(-reorderThresholdPx, reorderThresholdPx)
+
+                                    if (accumulatedDrag > reorderThresholdPx) {
+                                        onMove(1)
+                                        accumulatedDrag = 0f
+                                        visualDragOffset = 0f
+                                    } else if (accumulatedDrag < -reorderThresholdPx) {
+                                        onMove(-1)
+                                        accumulatedDrag = 0f
+                                        visualDragOffset = 0f
+                                    }
                                 }
+
+                                isReordering = false
+                                accumulatedDrag = 0f
+                                visualDragOffset = 0f
                             }
-                        )
+                        }
                     }
             ) {
                 val handleColor = if (isReordering) {
@@ -1897,3 +1933,4 @@ private val TOP_BAR_HEIGHT = 56.dp
 private const val SEARCH_DEBOUNCE_MS = 320L
 private const val EDGE_REVEAL_DISTANCE_PX = 18f
 private const val PAGE_INDICATOR_VISIBLE_MS = 1200L
+private const val TAB_REORDER_HOLD_MS = 180L
