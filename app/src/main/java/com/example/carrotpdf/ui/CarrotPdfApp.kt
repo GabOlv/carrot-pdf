@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.text.BasicTextField
@@ -61,6 +62,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -69,7 +71,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1243,8 +1244,9 @@ private fun TabSwitcherRow(
     onMove: (Int) -> Unit
 ) {
     val density = LocalDensity.current
-    val reorderThresholdPx = with(density) { 42.dp.toPx() }
+    val reorderThresholdPx = with(density) { 64.dp.toPx() }
     var accumulatedDrag by remember(tab.id) { mutableFloatStateOf(0f) }
+    var isReordering by remember(tab.id) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -1255,6 +1257,15 @@ private fun TabSwitcherRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .scale(if (isReordering) 1.025f else 1f)
+                .shadow(
+                    elevation = if (isReordering) 12.dp else 0.dp,
+                    shape = RoundedCornerShape(10.dp)
+                )
+                .background(
+                    color = if (isReordering) Color(0xFF242A31) else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp)
+                )
                 .border(
                     width = if (isActive) 1.dp else 0.dp,
                     color = if (isActive) CarrotColors.Accent else Color.Transparent,
@@ -1300,45 +1311,41 @@ private fun TabSwitcherRow(
                 modifier = Modifier
                     .size(width = 40.dp, height = 44.dp)
                     .pointerInput(tab.id) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val down = awaitFirstDown(
-                                    requireUnconsumed = false,
-                                    pass = PointerEventPass.Initial
-                                )
-                                down.consume()
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                isReordering = true
                                 accumulatedDrag = 0f
-                                var lastY = down.position.y
+                            },
+                            onDragCancel = {
+                                isReordering = false
+                                accumulatedDrag = 0f
+                            },
+                            onDragEnd = {
+                                isReordering = false
+                                accumulatedDrag = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                accumulatedDrag += dragAmount.y
 
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    val change = event.changes.firstOrNull { it.id == down.id }
-                                        ?: break
+                                while (accumulatedDrag > reorderThresholdPx) {
+                                    onMove(1)
+                                    accumulatedDrag -= reorderThresholdPx
+                                }
 
-                                    if (change.changedToUpIgnoreConsumed()) {
-                                        accumulatedDrag = 0f
-                                        break
-                                    }
-
-                                    val currentY = change.position.y
-                                    accumulatedDrag += currentY - lastY
-                                    lastY = currentY
-
-                                    if (accumulatedDrag > reorderThresholdPx) {
-                                        onMove(1)
-                                        accumulatedDrag = 0f
-                                    } else if (accumulatedDrag < -reorderThresholdPx) {
-                                        onMove(-1)
-                                        accumulatedDrag = 0f
-                                    }
-
-                                    change.consume()
+                                while (accumulatedDrag < -reorderThresholdPx) {
+                                    onMove(-1)
+                                    accumulatedDrag += reorderThresholdPx
                                 }
                             }
-                        }
+                        )
                     }
             ) {
-                val handleColor = Color.White.copy(alpha = 0.38f)
+                val handleColor = if (isReordering) {
+                    Color(0xFFFF7A1A)
+                } else {
+                    Color.White.copy(alpha = 0.38f)
+                }
 
                 listOf(10.dp, 18.dp, 26.dp).forEach { y ->
                     drawCircle(
