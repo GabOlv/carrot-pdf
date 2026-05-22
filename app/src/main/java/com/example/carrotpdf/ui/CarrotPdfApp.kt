@@ -83,6 +83,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.model.PdfTabPersistence
 import com.example.carrotpdf.pdf.PdfSearchResult
@@ -159,10 +162,6 @@ private fun CarrotPdfContent(
     }
 
     fun persistTabsNow() {
-        if (!hasRestoredPersistedTabs) {
-            return
-        }
-
         PdfTabPersistence.save(
             context = context.applicationContext,
             tabs = tabs.toList(),
@@ -275,6 +274,29 @@ private fun CarrotPdfContent(
     BackHandler(enabled = isSearchVisible) {
         closeSearch()
         isChromeVisible = true
+    }
+
+    DisposableEffect(activity, tabs, activeTabId) {
+        val lifecycle = (activity as? LifecycleOwner)?.lifecycle
+
+        if (lifecycle == null) {
+            onDispose {
+                persistTabsNow()
+            }
+        } else {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP) {
+                    persistTabsNow()
+                }
+            }
+
+            lifecycle.addObserver(observer)
+
+            onDispose {
+                persistTabsNow()
+                lifecycle.removeObserver(observer)
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
