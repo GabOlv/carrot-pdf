@@ -1194,14 +1194,14 @@ private fun TabSwitcherDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Open tabs",
+                        text = "Abas Abertas",
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f)
                     )
                     Text(
-                        text = "Edit",
+                        text = "Editar",
                         color = CarrotColors.Accent,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
@@ -1212,7 +1212,7 @@ private fun TabSwitcherDialog(
 
                 if (tabs.isEmpty()) {
                     Text(
-                        text = "No PDFs are open.",
+                        text = "Nenhum PDF está aberto.",
                         color = CarrotColors.TextMuted,
                         modifier = Modifier.padding(vertical = 18.dp)
                     )
@@ -1269,7 +1269,7 @@ private fun TabSwitcherDialog(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Open new PDF",
+                            text = "Abrir Novo PDF",
                             color = Color.White,
                             style = MaterialTheme.typography.bodyLarge
                         )
@@ -1286,14 +1286,14 @@ private fun TabSwitcherDialog(
             },
             title = {
                 Text(
-                    text = "Close tab?",
+                    text = "Fechar a Aba?",
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold
                 )
             },
             text = {
                 Text(
-                    text = "Close ${tab.title}?",
+                    text = "Fechar ${tab.title}?",
                     color = CarrotColors.TextSecondary
                 )
             },
@@ -1305,7 +1305,7 @@ private fun TabSwitcherDialog(
                     }
                 ) {
                     Text(
-                        text = "Close",
+                        text = "Sim",
                         color = CarrotColors.Accent
                     )
                 }
@@ -1317,7 +1317,7 @@ private fun TabSwitcherDialog(
                     }
                 ) {
                     Text(
-                        text = "Cancel",
+                        text = "Não",
                         color = Color.White.copy(alpha = 0.75f)
                     )
                 }
@@ -1384,7 +1384,7 @@ private fun TabSwitcherRow(
             )
 
             IconButtonCanvas(
-                contentDescription = "Close tab",
+                contentDescription = "Fechar a Aba",
                 onClick = onClose
             ) {
                 drawLine(
@@ -1537,31 +1537,31 @@ private fun ReaderMenuPopup(
                 .padding(vertical = 10.dp)
         ) {
             MenuAction(
-                text = "Open PDF",
+                text = "Abrir PDF...",
                 icon = MenuIcon.Folder,
                 onClick = onOpenPdf
             )
             MenuAction(
-                text = "Go to page",
+                text = "Ir para Pagina...",
                 icon = MenuIcon.PageNumber,
                 onClick = onGoToPage,
                 enabled = hasDocument
             )
             MenuDivider()
             MenuAction(
-                text = "Share",
+                text = "Compartilhar",
                 icon = MenuIcon.Share,
                 onClick = onSharePdf,
                 enabled = hasDocument
             )
             MenuAction(
-                text = "Download",
+                text = "Baixar",
                 icon = MenuIcon.Download,
                 onClick = onDownloadPdf,
                 enabled = hasDocument
             )
             MenuAction(
-                text = "Print",
+                text = "Imprimir",
                 icon = MenuIcon.Print,
                 onClick = onPrintPdf,
                 enabled = hasDocument

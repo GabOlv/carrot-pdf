@@ -21,7 +21,7 @@ fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Open a PDF to start reading",
+            text = "Abra um PDF para começar a ler",
             color = CarrotColors.TextPrimary,
             style = MaterialTheme.typography.titleMedium
         )
@@ -36,7 +36,7 @@ fun EmptyState(
                 contentColor = CarrotColors.Background
             )
         ) {
-            Text("Open PDF")
+            Text("Abrir PDF")
         }
     }
 }

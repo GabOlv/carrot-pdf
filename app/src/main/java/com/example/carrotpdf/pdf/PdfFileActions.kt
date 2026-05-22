@@ -161,7 +161,7 @@ private class UriPrintDocumentAdapter(
                 FileOutputStream(destination.fileDescriptor).use { output ->
                     input.copyTo(output)
                 }
-            } ?: error("Could not open PDF")
+            } ?: error("Erro ao abrir o PDF")
         }.onSuccess {
             callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
         }.onFailure {
