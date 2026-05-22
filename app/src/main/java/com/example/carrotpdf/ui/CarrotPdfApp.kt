@@ -917,7 +917,7 @@ private fun BoxScope.DrivePageIndicator(
                     .align(Alignment.TopEnd)
                     .width(handleHitWidth)
                     .fillMaxHeight()
-                    .pointerInput(heightPx, thumbCenterY) {
+                    .pointerInput(heightPx) {
                         awaitPointerEventScope {
                             while (true) {
                                 val down = awaitFirstDown(
