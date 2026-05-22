@@ -877,12 +877,12 @@ private fun BoxScope.DrivePageIndicator(
                 .coerceAtLeast(1f)
 
             val targetCenterY = (
-                handleHalfHeightPx +
-                    (travelHeightPx * scrollProgress.coerceIn(0f, 1f))
-            ).coerceIn(
-                handleHalfHeightPx,
-                heightPx - handleHalfHeightPx
-            )
+                    handleHalfHeightPx +
+                            (travelHeightPx * scrollProgress.coerceIn(0f, 1f))
+                    ).coerceIn(
+                    handleHalfHeightPx,
+                    heightPx - handleHalfHeightPx
+                )
 
             LaunchedEffect(targetCenterY, isDragging) {
                 if (!isDragging) {
@@ -908,14 +908,19 @@ private fun BoxScope.DrivePageIndicator(
                 onScrollToProgress(targetProgress)
             }
 
-            // Gesture layer restricted to the scrollbar side only.
-            // It does not cover the page number text, but it is large enough
-            // to grab comfortably on mobile.
+            // Gesture layer restricted to the current scrollbar thumb only.
+            // This avoids jumping the document when the user taps elsewhere
+            // along the page indicator's vertical space.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .fillMaxHeight()
+                    .offset(
+                        y = with(density) {
+                            (thumbCenterY - handleHalfHeightPx).toDp()
+                        }
+                    )
                     .width(handleHitWidth)
+                    .height(handleVisualHeight)
                     .pointerInput(heightPx) {
                         awaitPointerEventScope {
                             while (true) {
@@ -925,15 +930,18 @@ private fun BoxScope.DrivePageIndicator(
                                 )
 
                                 isDragging = true
-                                scrollToThumbPosition(down.position.y)
                                 down.consume()
+                                var lastY = down.position.y
 
                                 do {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
 
                                     event.changes.forEach { change ->
                                         if (change.pressed) {
-                                            scrollToThumbPosition(change.position.y)
+                                            val deltaY = change.position.y - lastY
+                                            lastY = change.position.y
+
+                                            scrollToThumbPosition(thumbCenterY + deltaY)
                                             change.consume()
                                         }
                                     }
