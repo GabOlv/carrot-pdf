@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -187,6 +188,23 @@ private fun CarrotPdfContent() {
             closeSearch()
             isChromeVisible = true
         }
+    }
+
+    fun moveTab(tabId: String, direction: Int) {
+        val fromIndex = tabs.indexOfFirst { it.id == tabId }
+
+        if (fromIndex < 0) {
+            return
+        }
+
+        val toIndex = (fromIndex + direction).coerceIn(0, tabs.lastIndex)
+
+        if (fromIndex == toIndex) {
+            return
+        }
+
+        val tab = tabs.removeAt(fromIndex)
+        tabs.add(toIndex, tab)
     }
 
     val pdfPicker = rememberLauncherForActivityResult(
@@ -446,6 +464,9 @@ private fun CarrotPdfContent() {
                     },
                     onCloseTab = { tabId ->
                         closeTab(tabId)
+                    },
+                    onMoveTab = { tabId, direction ->
+                        moveTab(tabId, direction)
                     },
                     onOpenPdf = {
                         isTabSwitcherOpen = false
@@ -1029,16 +1050,20 @@ private fun TabSwitcherDialog(
     activeTabId: String?,
     onSelect: (String) -> Unit,
     onCloseTab: (String) -> Unit,
+    onMoveTab: (String, Int) -> Unit,
     onOpenPdf: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var closeCandidate by remember { mutableStateOf<PdfTab?>(null) }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize(),
+                .fillMaxSize()
+                .clickable { onDismiss() },
             contentAlignment = Alignment.BottomCenter
         ) {
             Column(
@@ -1053,6 +1078,7 @@ private fun TabSwitcherDialog(
                         color = Color(0xF31A1D22),
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     )
+                    .clickable { }
                     .padding(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 18.dp)
             ) {
                 Box(
@@ -1111,7 +1137,10 @@ private fun TabSwitcherDialog(
                                 onSelect(tab.id)
                             },
                             onClose = {
-                                onCloseTab(tab.id)
+                                closeCandidate = tab
+                            },
+                            onMove = { direction ->
+                                onMoveTab(tab.id, direction)
                             }
                         )
                     }
@@ -1154,6 +1183,54 @@ private fun TabSwitcherDialog(
             }
         }
     }
+
+    closeCandidate?.let { tab ->
+        AlertDialog(
+            onDismissRequest = {
+                closeCandidate = null
+            },
+            title = {
+                Text(
+                    text = "Close tab?",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                Text(
+                    text = "Close ${tab.title}?",
+                    color = CarrotColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        closeCandidate = null
+                        onCloseTab(tab.id)
+                    }
+                ) {
+                    Text(
+                        text = "Close",
+                        color = CarrotColors.Accent
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        closeCandidate = null
+                    }
+                ) {
+                    Text(
+                        text = "Cancel",
+                        color = Color.White.copy(alpha = 0.75f)
+                    )
+                }
+            },
+            containerColor = Color(0xF51A1D22),
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
 }
 
 @Composable
@@ -1161,8 +1238,13 @@ private fun TabSwitcherRow(
     tab: PdfTab,
     isActive: Boolean,
     onSelect: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onMove: (Int) -> Unit
 ) {
+    val density = LocalDensity.current
+    val reorderThresholdPx = with(density) { 42.dp.toPx() }
+    var accumulatedDrag by remember(tab.id) { mutableFloatStateOf(0f) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1213,12 +1295,47 @@ private fun TabSwitcherRow(
                     cap = StrokeCap.Round
                 )
             }
+            Canvas(
+                modifier = Modifier
+                    .size(width = 24.dp, height = 36.dp)
+                    .pointerInput(tab.id) {
+                        detectVerticalDragGestures(
+                            onDragEnd = {
+                                accumulatedDrag = 0f
+                            },
+                            onDragCancel = {
+                                accumulatedDrag = 0f
+                            },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                accumulatedDrag += dragAmount
 
-            Text(
-                text = "⋮⋮",
-                color = CarrotColors.TextMuted,
-                style = MaterialTheme.typography.bodyMedium
-            )
+                                if (accumulatedDrag > reorderThresholdPx) {
+                                    onMove(1)
+                                    accumulatedDrag = 0f
+                                } else if (accumulatedDrag < -reorderThresholdPx) {
+                                    onMove(-1)
+                                    accumulatedDrag = 0f
+                                }
+                            }
+                        )
+                    }
+            ) {
+                val handleColor = Color.White.copy(alpha = 0.38f)
+
+                listOf(10.dp, 18.dp, 26.dp).forEach { y ->
+                    drawCircle(
+                        color = handleColor,
+                        radius = 1.35.dp.toPx(),
+                        center = Offset(8.dp.toPx(), y.toPx())
+                    )
+                    drawCircle(
+                        color = handleColor,
+                        radius = 1.35.dp.toPx(),
+                        center = Offset(16.dp.toPx(), y.toPx())
+                    )
+                }
+            }
         }
     }
 }
