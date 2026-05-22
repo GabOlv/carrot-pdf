@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,13 +37,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -59,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -72,6 +73,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -105,6 +108,9 @@ fun CarrotPdfApp() {
 private fun CarrotPdfContent() {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    val statusBarTop = WindowInsets.statusBars
+        .asPaddingValues()
+        .calculateTopPadding()
     val tabs = remember { mutableStateListOf<PdfTab>() }
     val searchResults = remember { mutableStateListOf<PdfSearchResult>() }
 
@@ -357,7 +363,12 @@ private fun CarrotPdfContent() {
                 exit = fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .padding(
+                        start = 10.dp,
+                        top = statusBarTop + 8.dp,
+                        end = 10.dp,
+                        bottom = 8.dp
+                    )
             ) {
                 ReaderSearchOverlay(
                     query = searchQuery,
@@ -573,10 +584,14 @@ private fun ReaderTopBar(
     onTabs: () -> Unit,
     onMenu: () -> Unit
 ) {
+    val statusBarTop = WindowInsets.statusBars
+        .asPaddingValues()
+        .calculateTopPadding()
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(TOP_BAR_HEIGHT)
+            .height(TOP_BAR_HEIGHT + statusBarTop)
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
@@ -590,7 +605,11 @@ private fun ReaderTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(start = 14.dp, end = 10.dp),
+                .padding(
+                    start = 14.dp,
+                    top = statusBarTop,
+                    end = 10.dp
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButtonCanvas(
@@ -648,23 +667,28 @@ private fun ReaderTopBar(
                 contentDescription = "Tabs",
                 onClick = onTabs
             ) {
-                drawSimpleCarrotTabsIcon(tabCount = tabCount)
+                drawBookTabsIcon()
             }
 
             Box(
                 modifier = Modifier
-                    .size(20.dp)
-                    .offset(x = (-8).dp, y = 8.dp)
+                    .size(width = 18.dp, height = 16.dp)
+                    .offset(x = (-10).dp, y = 8.dp)
                     .background(
-                        color = Color(0xFF33383F),
-                        shape = RoundedCornerShape(10.dp)
+                        color = Color(0xEE2B3037),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(8.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = tabCount.coerceAtMost(99).toString(),
                     color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -928,41 +952,73 @@ private fun TabSwitcherDialog(
     onOpenPdf: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 18.dp)
+                    .shadow(
+                        elevation = 20.dp,
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                    )
+                    .background(
+                        color = Color(0xF31A1D22),
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                    )
+                    .padding(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 18.dp)
             ) {
-                Text(
-                    text = "Abas abertas",
-                    color = CarrotColors.TextPrimary,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
+                Box(
+                    modifier = Modifier
+                        .width(42.dp)
+                        .height(4.dp)
+                        .background(
+                            color = Color.White.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(2.dp)
+                        )
+                        .align(Alignment.CenterHorizontally)
                 )
-                TextButton(onClick = { }) {
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "Editar",
-                        color = CarrotColors.Accent
+                        text = "Open tabs",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "Edit",
+                        color = CarrotColors.Accent,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
                     )
                 }
-            }
-        },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(0.dp)
-            ) {
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 if (tabs.isEmpty()) {
                     Text(
                         text = "No PDFs are open.",
-                        color = CarrotColors.TextMuted
+                        color = CarrotColors.TextMuted,
+                        modifier = Modifier.padding(vertical = 18.dp)
                     )
                 }
 
                 LazyColumn(
-                    modifier = Modifier.heightIn(max = 340.dp)
+                    modifier = Modifier.heightIn(max = 360.dp)
                 ) {
                     items(
                         items = tabs,
@@ -984,11 +1040,15 @@ private fun TabSwitcherDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .height(52.dp)
+                        .padding(top = 14.dp)
+                        .height(54.dp)
                         .border(
                             width = 1.dp,
-                            color = CarrotColors.Accent.copy(alpha = 0.65f),
+                            color = CarrotColors.Accent.copy(alpha = 0.72f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .background(
+                            color = Color.White.copy(alpha = 0.03f),
                             shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { onOpenPdf() },
@@ -1000,30 +1060,20 @@ private fun TabSwitcherDialog(
                         Text(
                             text = "+",
                             color = CarrotColors.Accent,
-                            style = MaterialTheme.typography.headlineSmall
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Normal
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Abrir novo PDF",
-                            color = CarrotColors.TextPrimary,
+                            text = "Open new PDF",
+                            color = Color.White,
                             style = MaterialTheme.typography.bodyLarge
                         )
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(
-                    text = "Close",
-                    color = CarrotColors.TextSecondary
-                )
-            }
-        },
-        containerColor = Color(0xF51A1D22),
-        shape = RoundedCornerShape(24.dp)
-    )
+        }
+    }
 }
 
 @Composable
@@ -1033,14 +1083,11 @@ private fun TabSwitcherRow(
     onSelect: () -> Unit,
     onClose: () -> Unit
 ) {
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelect() },
-        colors = CardDefaults.cardColors(
-            containerColor = if (isActive) Color(0x33FF7A1A) else Color.Transparent
-        ),
-        shape = RoundedCornerShape(10.dp)
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
             modifier = Modifier
@@ -1067,10 +1114,23 @@ private fun TabSwitcherRow(
                 modifier = Modifier.weight(1f)
             )
 
-            TextButton(onClick = onClose) {
-                Text(
-                    text = "x",
-                    color = CarrotColors.TextMuted
+            IconButtonCanvas(
+                contentDescription = "Close tab",
+                onClick = onClose
+            ) {
+                drawLine(
+                    color = Color.White.copy(alpha = 0.58f),
+                    start = Offset(8.dp.toPx(), 8.dp.toPx()),
+                    end = Offset(16.dp.toPx(), 16.dp.toPx()),
+                    strokeWidth = 1.8.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = Color.White.copy(alpha = 0.58f),
+                    start = Offset(16.dp.toPx(), 8.dp.toPx()),
+                    end = Offset(8.dp.toPx(), 16.dp.toPx()),
+                    strokeWidth = 1.8.dp.toPx(),
+                    cap = StrokeCap.Round
                 )
             }
 
@@ -1093,6 +1153,10 @@ private fun ReaderMenuPopup(
     onPrintPdf: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val statusBarTop = WindowInsets.statusBars
+        .asPaddingValues()
+        .calculateTopPadding()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1101,40 +1165,49 @@ private fun ReaderMenuPopup(
     ) {
         Column(
             modifier = Modifier
-                .padding(top = TOP_BAR_HEIGHT + 2.dp, end = 12.dp)
+                .padding(top = statusBarTop + TOP_BAR_HEIGHT + 2.dp, end = 12.dp)
                 .width(248.dp)
+                .shadow(
+                    elevation = 18.dp,
+                    shape = RoundedCornerShape(18.dp)
+                )
                 .background(
-                    color = Color(0xF51D2025),
-                    shape = RoundedCornerShape(16.dp)
+                    color = Color(0xF31B1F24),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(18.dp)
                 )
                 .padding(vertical = 10.dp)
         ) {
             MenuAction(
-                text = "Abrir PDF",
+                text = "Open PDF",
                 icon = MenuIcon.Folder,
                 onClick = onOpenPdf
             )
             MenuAction(
-                text = "Ir para página",
+                text = "Go to page",
                 icon = MenuIcon.PageNumber,
                 onClick = onGoToPage,
                 enabled = hasDocument
             )
             MenuDivider()
             MenuAction(
-                text = "Compartilhar",
+                text = "Share",
                 icon = MenuIcon.Share,
                 onClick = onSharePdf,
                 enabled = hasDocument
             )
             MenuAction(
-                text = "Baixar",
+                text = "Download",
                 icon = MenuIcon.Download,
                 onClick = onDownloadPdf,
                 enabled = hasDocument
             )
             MenuAction(
-                text = "Imprimir",
+                text = "Print",
                 icon = MenuIcon.Print,
                 onClick = onPrintPdf,
                 enabled = hasDocument
@@ -1176,7 +1249,11 @@ private fun FloatingAnnotationButton(
 ) {
     Box(
         modifier = Modifier
-            .size(68.dp)
+            .size(58.dp)
+            .shadow(
+                elevation = 14.dp,
+                shape = RoundedCornerShape(17.dp)
+            )
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
@@ -1184,38 +1261,38 @@ private fun FloatingAnnotationButton(
                         Color(0xFFFF5A10)
                     )
                 ),
-                shape = RoundedCornerShape(20.dp)
+                shape = RoundedCornerShape(17.dp)
             )
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(34.dp)) {
+        Canvas(modifier = Modifier.size(28.dp)) {
             drawLine(
                 color = Color.White,
-                start = Offset(9.dp.toPx(), 24.dp.toPx()),
-                end = Offset(24.dp.toPx(), 9.dp.toPx()),
-                strokeWidth = 4.dp.toPx(),
+                start = Offset(8.dp.toPx(), 21.dp.toPx()),
+                end = Offset(20.dp.toPx(), 9.dp.toPx()),
+                strokeWidth = 3.2.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
                 color = Color.White,
-                start = Offset(22.dp.toPx(), 7.dp.toPx()),
-                end = Offset(27.dp.toPx(), 12.dp.toPx()),
-                strokeWidth = 4.dp.toPx(),
+                start = Offset(18.dp.toPx(), 7.dp.toPx()),
+                end = Offset(23.dp.toPx(), 12.dp.toPx()),
+                strokeWidth = 3.2.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
                 color = Color(0xFF72D86A),
-                start = Offset(24.dp.toPx(), 7.dp.toPx()),
-                end = Offset(29.dp.toPx(), 3.dp.toPx()),
-                strokeWidth = 3.dp.toPx(),
+                start = Offset(20.dp.toPx(), 7.dp.toPx()),
+                end = Offset(25.dp.toPx(), 3.dp.toPx()),
+                strokeWidth = 2.3.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
                 color = Color(0xFF72D86A),
-                start = Offset(27.dp.toPx(), 9.dp.toPx()),
-                end = Offset(31.dp.toPx(), 7.dp.toPx()),
-                strokeWidth = 3.dp.toPx(),
+                start = Offset(22.dp.toPx(), 9.dp.toPx()),
+                end = Offset(26.dp.toPx(), 7.dp.toPx()),
+                strokeWidth = 2.3.dp.toPx(),
                 cap = StrokeCap.Round
             )
         }
@@ -1348,31 +1425,38 @@ private fun IconButtonCanvas(
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSimpleCarrotTabsIcon(
-    tabCount: Int
-) {
-    val accent = Color(0xFFFF7A1A)
-    drawRoundRect(
-        color = accent,
-        topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
-        size = androidx.compose.ui.geometry.Size(18.dp.toPx(), 18.dp.toPx()),
-        style = Stroke(width = 2.dp.toPx()),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
-    )
-    drawLine(accent, Offset(9.dp.toPx(), 16.dp.toPx()), Offset(15.dp.toPx(), 8.dp.toPx()), 2.2.dp.toPx(), StrokeCap.Round)
-    drawLine(accent, Offset(15.dp.toPx(), 8.dp.toPx()), Offset(18.dp.toPx(), 11.dp.toPx()), 2.2.dp.toPx(), StrokeCap.Round)
-    drawLine(Color(0xFF6DD36E), Offset(16.dp.toPx(), 7.dp.toPx()), Offset(20.dp.toPx(), 4.dp.toPx()), 1.8.dp.toPx(), StrokeCap.Round)
-    drawLine(Color(0xFF6DD36E), Offset(18.dp.toPx(), 8.dp.toPx()), Offset(22.dp.toPx(), 7.dp.toPx()), 1.8.dp.toPx(), StrokeCap.Round)
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBookTabsIcon() {
+    val stroke = 1.8.dp.toPx()
+    val white = Color.White.copy(alpha = 0.92f)
 
-    if (tabCount > 1) {
-        drawRoundRect(
-            color = Color.White.copy(alpha = 0.7f),
-            topLeft = Offset(0.dp.toPx(), 0.dp.toPx()),
-            size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 16.dp.toPx()),
-            style = Stroke(width = 1.3.dp.toPx()),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
-        )
-    }
+    drawRoundRect(
+        color = white,
+        topLeft = Offset(4.dp.toPx(), 5.dp.toPx()),
+        size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 15.dp.toPx()),
+        style = Stroke(width = stroke),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.5.dp.toPx())
+    )
+    drawLine(
+        color = white,
+        start = Offset(12.dp.toPx(), 5.dp.toPx()),
+        end = Offset(12.dp.toPx(), 20.dp.toPx()),
+        strokeWidth = stroke,
+        cap = StrokeCap.Round
+    )
+    drawLine(
+        color = white.copy(alpha = 0.62f),
+        start = Offset(7.dp.toPx(), 9.dp.toPx()),
+        end = Offset(10.dp.toPx(), 9.dp.toPx()),
+        strokeWidth = 1.2.dp.toPx(),
+        cap = StrokeCap.Round
+    )
+    drawLine(
+        color = white.copy(alpha = 0.62f),
+        start = Offset(14.dp.toPx(), 9.dp.toPx()),
+        end = Offset(17.dp.toPx(), 9.dp.toPx()),
+        strokeWidth = 1.2.dp.toPx(),
+        cap = StrokeCap.Round
+    )
 }
 
 private enum class MenuIcon {
