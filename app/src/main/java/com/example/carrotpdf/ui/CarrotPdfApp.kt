@@ -1244,8 +1244,9 @@ private fun TabSwitcherRow(
     onMove: (Int) -> Unit
 ) {
     val density = LocalDensity.current
-    val reorderThresholdPx = with(density) { 64.dp.toPx() }
+    val reorderThresholdPx = with(density) { 96.dp.toPx() }
     var accumulatedDrag by remember(tab.id) { mutableFloatStateOf(0f) }
+    var visualDragOffset by remember(tab.id) { mutableFloatStateOf(0f) }
     var isReordering by remember(tab.id) { mutableStateOf(false) }
 
     Row(
@@ -1257,6 +1258,7 @@ private fun TabSwitcherRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .offset(y = with(density) { visualDragOffset.toDp() })
                 .scale(if (isReordering) 1.025f else 1f)
                 .shadow(
                     elevation = if (isReordering) 12.dp else 0.dp,
@@ -1315,27 +1317,32 @@ private fun TabSwitcherRow(
                             onDragStart = {
                                 isReordering = true
                                 accumulatedDrag = 0f
+                                visualDragOffset = 0f
                             },
                             onDragCancel = {
                                 isReordering = false
                                 accumulatedDrag = 0f
+                                visualDragOffset = 0f
                             },
                             onDragEnd = {
                                 isReordering = false
                                 accumulatedDrag = 0f
+                                visualDragOffset = 0f
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
                                 accumulatedDrag += dragAmount.y
+                                visualDragOffset = (visualDragOffset + dragAmount.y)
+                                    .coerceIn(-reorderThresholdPx, reorderThresholdPx)
 
-                                while (accumulatedDrag > reorderThresholdPx) {
+                                if (accumulatedDrag > reorderThresholdPx) {
                                     onMove(1)
-                                    accumulatedDrag -= reorderThresholdPx
-                                }
-
-                                while (accumulatedDrag < -reorderThresholdPx) {
+                                    accumulatedDrag = 0f
+                                    visualDragOffset = 0f
+                                } else if (accumulatedDrag < -reorderThresholdPx) {
                                     onMove(-1)
-                                    accumulatedDrag += reorderThresholdPx
+                                    accumulatedDrag = 0f
+                                    visualDragOffset = 0f
                                 }
                             }
                         )
