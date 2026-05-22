@@ -46,4 +46,4 @@ fun rememberPdfPageLayout(
 }
 
 private val TABLET_WIDTH_THRESHOLD = 600.dp
-private val TABLET_READABLE_PAGE_WIDTH = 720.dp
+private val TABLET_READABLE_PAGE_WIDTH = 600.dp

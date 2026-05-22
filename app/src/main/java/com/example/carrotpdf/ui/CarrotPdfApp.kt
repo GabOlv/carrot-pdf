@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1071,6 +1072,7 @@ private fun TabSwitcherDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .widthIn(max = 620.dp)
                     .padding(horizontal = 12.dp, vertical = 18.dp)
                     .shadow(
                         elevation = 20.dp,
