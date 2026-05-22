@@ -111,6 +111,43 @@ class PdfViewportState(
         return panOffset != previousOffset
     }
 
+    fun scrollVerticallyBy(deltaY: Float): Float {
+        val scale = visualScale.coerceAtLeast(0.001f)
+        val currentOrigin = viewportOrigin()
+        val viewportWidth = viewportSize.width.toFloat()
+        val viewportHeight = viewportSize.height.toFloat()
+
+        if (
+            viewportWidth <= 0f ||
+            viewportHeight <= 0f ||
+            contentSize.width <= 0 ||
+            contentSize.height <= 0
+        ) {
+            return 0f
+        }
+
+        val viewportWidthUnscaled = viewportWidth / scale
+        val viewportHeightUnscaled = viewportHeight / scale
+        val maxLeftPx = (contentSize.width - viewportWidthUnscaled).coerceAtLeast(0f)
+        val maxTopPx = (contentSize.height - viewportHeightUnscaled).coerceAtLeast(0f)
+        val nextLeftPx = currentOrigin.x.coerceIn(0f, maxLeftPx)
+        val nextTopPx = (currentOrigin.y - (deltaY / scale)).coerceIn(0f, maxTopPx)
+
+        setViewportOrigin(
+            leftPx = nextLeftPx,
+            topPx = nextTopPx
+        )
+
+        val actualOrigin = viewportOrigin()
+        val consumed = (currentOrigin.y - actualOrigin.y) * scale
+
+        PdfViewerDebug.log {
+            "verticalScroll deltaY=$deltaY consumed=$consumed origin=$currentOrigin next=${viewportOrigin()} scale=$scale maxLeft=$maxLeftPx maxTop=$maxTopPx"
+        }
+
+        return consumed
+    }
+
     fun setViewportOrigin(
         leftPx: Float,
         topPx: Float

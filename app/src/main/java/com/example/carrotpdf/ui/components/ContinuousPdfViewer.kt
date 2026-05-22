@@ -202,16 +202,9 @@ fun ContinuousPdfViewer(
             0f
         }
         val scrollableState = rememberScrollableState { delta ->
-            val previousPanY = viewerState.viewportState.panOffset.y
-            val didPan = viewerState.viewportState.panBy(
-                androidx.compose.ui.geometry.Offset(
-                    x = 0f,
-                    y = delta
-                )
-            )
-            val consumed = viewerState.viewportState.panOffset.y - previousPanY
+            val consumed = viewerState.viewportState.scrollVerticallyBy(delta)
 
-            if (didPan && consumed != 0f) {
+            if (consumed != 0f) {
                 isManualScrollInProgress = true
                 onUserInteraction()
             }
