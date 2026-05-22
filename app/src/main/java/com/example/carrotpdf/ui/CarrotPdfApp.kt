@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -90,6 +91,7 @@ import androidx.lifecycle.LifecycleOwner
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.model.PdfTabPersistence
 import com.example.carrotpdf.pdf.PdfSearchResult
+import com.example.carrotpdf.pdf.createPdfFromImages
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
@@ -104,25 +106,35 @@ import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 fun CarrotPdfApp(
-    externalPdfUri: Uri? = null
+    externalPdfUri: Uri? = null,
+    externalImageUris: List<Uri> = emptyList(),
+    externalOpenRequestId: Int = 0
 ) {
     CarrotDesignTheme(darkTheme = true) {
-        CarrotPdfContent(externalPdfUri = externalPdfUri)
+        CarrotPdfContent(
+            externalPdfUri = externalPdfUri,
+            externalImageUris = externalImageUris,
+            externalOpenRequestId = externalOpenRequestId
+        )
     }
 }
 
 @Composable
 private fun CarrotPdfContent(
-    externalPdfUri: Uri?
+    externalPdfUri: Uri?,
+    externalImageUris: List<Uri>,
+    externalOpenRequestId: Int
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    val coroutineScope = rememberCoroutineScope()
     val statusBarTop = WindowInsets.statusBars
         .asPaddingValues()
         .calculateTopPadding()
@@ -141,6 +153,7 @@ private fun CarrotPdfContent(
     var isSearching by remember { mutableStateOf(false) }
     var activeSearchResultIndex by remember { mutableIntStateOf(-1) }
     var isLoadingDocument by remember { mutableStateOf(false) }
+    var isCreatingImagePdf by remember { mutableStateOf(false) }
     var hasRestoredPersistedTabs by remember { mutableStateOf(false) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
@@ -208,6 +221,42 @@ private fun CarrotPdfContent(
         )
     }
 
+    fun openImagesAsPdf(imageUris: List<Uri>) {
+        if (imageUris.isEmpty()) {
+            return
+        }
+
+        coroutineScope.launch {
+            isCreatingImagePdf = true
+
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    createPdfFromImages(
+                        context = context.applicationContext,
+                        imageUris = imageUris
+                    )
+                }
+            } finally {
+                isCreatingImagePdf = false
+            }
+
+            result
+                .onSuccess { generatedPdf ->
+                    openTab(
+                        uri = generatedPdf.uri,
+                        title = generatedPdf.title
+                    )
+                }
+                .onFailure {
+                    Toast.makeText(
+                        context,
+                        "Não foi possível criar o PDF das imagens.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+        }
+    }
+
     fun closeTab(tabId: String) {
         val index = tabs.indexOfFirst { it.id == tabId }
 
@@ -272,6 +321,29 @@ private fun CarrotPdfContent(
         pdfPicker.launch(arrayOf("application/pdf"))
     }
 
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+        onResult = { uris ->
+            if (uris.isNotEmpty()) {
+                uris.forEach { uri ->
+                    try {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    } catch (_: SecurityException) {
+                        // Some providers grant only temporary access.
+                    }
+                }
+
+                openImagesAsPdf(uris)
+            }
+        }
+    )
+    val openImages = {
+        imagePicker.launch(arrayOf("image/*"))
+    }
+
     BackHandler(enabled = isSearchVisible) {
         closeSearch()
         isChromeVisible = true
@@ -313,9 +385,14 @@ private fun CarrotPdfContent(
         hasRestoredPersistedTabs = true
     }
 
-    LaunchedEffect(externalPdfUri, hasRestoredPersistedTabs) {
-        if (hasRestoredPersistedTabs && externalPdfUri != null) {
-            openExternalPdf(externalPdfUri)
+    LaunchedEffect(externalOpenRequestId, hasRestoredPersistedTabs) {
+        if (!hasRestoredPersistedTabs || externalOpenRequestId == 0) {
+            return@LaunchedEffect
+        }
+
+        when {
+            externalImageUris.isNotEmpty() -> openImagesAsPdf(externalImageUris)
+            externalPdfUri != null -> openExternalPdf(externalPdfUri)
         }
     }
 
@@ -538,6 +615,22 @@ private fun CarrotPdfContent(
                 )
             }
 
+            if (isCreatingImagePdf) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.42f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Criando PDF...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
             if (isTabSwitcherOpen) {
                 TabSwitcherDialog(
                     tabs = tabs,
@@ -569,6 +662,10 @@ private fun CarrotPdfContent(
                     onOpenPdf = {
                         isOverflowOpen = false
                         openPdf()
+                    },
+                    onOpenImages = {
+                        isOverflowOpen = false
+                        openImages()
                     },
                     onGoToPage = {
                         isOverflowOpen = false
@@ -1501,6 +1598,7 @@ private fun TabSwitcherRow(
 private fun ReaderMenuPopup(
     hasDocument: Boolean,
     onOpenPdf: () -> Unit,
+    onOpenImages: () -> Unit,
     onGoToPage: () -> Unit,
     onSharePdf: () -> Unit,
     onDownloadPdf: () -> Unit,
@@ -1540,6 +1638,11 @@ private fun ReaderMenuPopup(
                 text = "Abrir PDF...",
                 icon = MenuIcon.Folder,
                 onClick = onOpenPdf
+            )
+            MenuAction(
+                text = "Abrir imagens...",
+                icon = MenuIcon.PageNumber,
+                onClick = onOpenImages
             )
             MenuAction(
                 text = "Ir para Pagina...",
