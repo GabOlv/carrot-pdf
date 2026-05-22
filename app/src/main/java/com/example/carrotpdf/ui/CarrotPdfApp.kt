@@ -17,6 +17,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -43,7 +44,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,6 +63,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -880,6 +881,13 @@ private fun ReaderSearchOverlay(
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
+    val searchText = when {
+        isSearching -> "Searching"
+        query.isBlank() -> ""
+        resultCount == 0 -> "0"
+        else -> "${activeResultIndex + 1} / $resultCount"
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -887,57 +895,122 @@ private fun ReaderSearchOverlay(
             .background(
                 color = Color(0xF70B0D10)
             )
-            .padding(start = 8.dp, end = 8.dp, top = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TextButton(onClick = onClose) {
-            Text(
-                text = "<",
+        IconButtonCanvas(
+            contentDescription = "Close search",
+            onClick = onClose
+        ) {
+            drawLine(
                 color = Color.White,
-                style = MaterialTheme.typography.titleLarge
+                start = Offset(16.dp.toPx(), 6.dp.toPx()),
+                end = Offset(8.dp.toPx(), 12.dp.toPx()),
+                strokeWidth = 2.2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = Color.White,
+                start = Offset(8.dp.toPx(), 12.dp.toPx()),
+                end = Offset(16.dp.toPx(), 18.dp.toPx()),
+                strokeWidth = 2.2.dp.toPx(),
+                cap = StrokeCap.Round
             )
         }
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            singleLine = true,
-            placeholder = {
-                Text("Search")
-            },
-            modifier = Modifier.weight(1f)
-        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(42.dp)
+                .background(
+                    color = Color(0xFF252A31),
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .padding(start = 16.dp, end = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = Color.White
+                ),
+                cursorBrush = SolidColor(CarrotColors.Accent),
+                modifier = Modifier.fillMaxWidth(),
+                decorationBox = { innerTextField ->
+                    if (query.isBlank()) {
+                        Text(
+                            text = "Search in PDF",
+                            color = Color.White.copy(alpha = 0.42f),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                    innerTextField()
+                }
+            )
+        }
 
         Text(
-            text = when {
-                isSearching -> "..."
-                resultCount == 0 -> "0"
-                else -> "${activeResultIndex + 1} / $resultCount"
-            },
-            color = CarrotColors.TextSecondary,
+            text = searchText,
+            color = Color.White.copy(alpha = if (searchText.isBlank()) 0f else 0.72f),
             style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
             modifier = Modifier.padding(horizontal = 10.dp)
         )
 
-        TextButton(
-            enabled = resultCount > 0,
-            onClick = onPrevious
+        IconButtonCanvas(
+            contentDescription = "Previous result",
+            onClick = {
+                if (resultCount > 0) {
+                    onPrevious()
+                }
+            }
         ) {
-            Text(
-                text = "<",
-                color = if (resultCount > 0) Color.White else CarrotColors.TextMuted,
-                style = MaterialTheme.typography.titleLarge
+            val color = if (resultCount > 0) Color.White else Color.White.copy(alpha = 0.24f)
+            drawLine(
+                color = color,
+                start = Offset(15.dp.toPx(), 7.dp.toPx()),
+                end = Offset(9.dp.toPx(), 12.dp.toPx()),
+                strokeWidth = 2.2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(9.dp.toPx(), 12.dp.toPx()),
+                end = Offset(15.dp.toPx(), 17.dp.toPx()),
+                strokeWidth = 2.2.dp.toPx(),
+                cap = StrokeCap.Round
             )
         }
 
-        TextButton(
-            enabled = resultCount > 0,
-            onClick = onNext
+        IconButtonCanvas(
+            contentDescription = "Next result",
+            onClick = {
+                if (resultCount > 0) {
+                    onNext()
+                }
+            }
         ) {
-            Text(
-                text = ">",
-                color = if (resultCount > 0) Color.White else CarrotColors.TextMuted,
-                style = MaterialTheme.typography.titleLarge
+            val color = if (resultCount > 0) Color.White else Color.White.copy(alpha = 0.24f)
+            drawLine(
+                color = color,
+                start = Offset(9.dp.toPx(), 7.dp.toPx()),
+                end = Offset(15.dp.toPx(), 12.dp.toPx()),
+                strokeWidth = 2.2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(15.dp.toPx(), 12.dp.toPx()),
+                end = Offset(9.dp.toPx(), 17.dp.toPx()),
+                strokeWidth = 2.2.dp.toPx(),
+                cap = StrokeCap.Round
             )
         }
     }
