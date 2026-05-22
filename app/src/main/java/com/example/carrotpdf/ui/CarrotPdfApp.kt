@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -112,6 +113,9 @@ private fun CarrotPdfContent() {
     val statusBarTop = WindowInsets.statusBars
         .asPaddingValues()
         .calculateTopPadding()
+    val navigationBarBottom = WindowInsets.navigationBars
+        .asPaddingValues()
+        .calculateBottomPadding()
     val tabs = remember { mutableStateListOf<PdfTab>() }
     val searchResults = remember { mutableStateListOf<PdfSearchResult>() }
 
@@ -415,7 +419,10 @@ private fun CarrotPdfContent() {
                 exit = fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 20.dp, bottom = 28.dp)
+                    .padding(
+                        end = 18.dp,
+                        bottom = navigationBarBottom + 18.dp
+                    )
             ) {
                 FloatingAnnotationButton(
                     onClick = {
@@ -1322,50 +1329,73 @@ private fun FloatingAnnotationButton(
 ) {
     Box(
         modifier = Modifier
-            .size(58.dp)
+            .size(50.dp)
             .shadow(
-                elevation = 14.dp,
-                shape = RoundedCornerShape(17.dp)
+                elevation = 10.dp,
+                shape = RoundedCornerShape(15.dp)
             )
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFFFF7A1A),
-                        Color(0xFFFF5A10)
+                        Color(0xDDFF7A1A),
+                        Color(0xCCFF5A10)
                     )
                 ),
-                shape = RoundedCornerShape(17.dp)
+                shape = RoundedCornerShape(15.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(15.dp)
             )
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(28.dp)) {
+        Canvas(modifier = Modifier.size(27.dp)) {
+            val body = Color.White.copy(alpha = 0.96f)
+            val green = Color(0xFF78D66A)
+            val stroke = 2.4.dp.toPx()
+
             drawLine(
-                color = Color.White,
-                start = Offset(8.dp.toPx(), 21.dp.toPx()),
-                end = Offset(20.dp.toPx(), 9.dp.toPx()),
-                strokeWidth = 3.2.dp.toPx(),
+                color = body,
+                start = Offset(7.dp.toPx(), 21.dp.toPx()),
+                end = Offset(18.dp.toPx(), 10.dp.toPx()),
+                strokeWidth = 4.8.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
-                color = Color.White,
-                start = Offset(18.dp.toPx(), 7.dp.toPx()),
-                end = Offset(23.dp.toPx(), 12.dp.toPx()),
-                strokeWidth = 3.2.dp.toPx(),
+                color = Color(0xFFFF7A1A).copy(alpha = 0.92f),
+                start = Offset(9.dp.toPx(), 19.dp.toPx()),
+                end = Offset(15.dp.toPx(), 13.dp.toPx()),
+                strokeWidth = 1.1.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
-                color = Color(0xFF72D86A),
-                start = Offset(20.dp.toPx(), 7.dp.toPx()),
-                end = Offset(25.dp.toPx(), 3.dp.toPx()),
-                strokeWidth = 2.3.dp.toPx(),
+                color = body,
+                start = Offset(17.dp.toPx(), 8.dp.toPx()),
+                end = Offset(22.dp.toPx(), 13.dp.toPx()),
+                strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
             drawLine(
-                color = Color(0xFF72D86A),
-                start = Offset(22.dp.toPx(), 9.dp.toPx()),
-                end = Offset(26.dp.toPx(), 7.dp.toPx()),
-                strokeWidth = 2.3.dp.toPx(),
+                color = green,
+                start = Offset(19.dp.toPx(), 8.dp.toPx()),
+                end = Offset(24.dp.toPx(), 4.dp.toPx()),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = green,
+                start = Offset(21.dp.toPx(), 10.dp.toPx()),
+                end = Offset(26.dp.toPx(), 8.dp.toPx()),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = green.copy(alpha = 0.9f),
+                start = Offset(20.dp.toPx(), 8.dp.toPx()),
+                end = Offset(22.dp.toPx(), 3.dp.toPx()),
+                strokeWidth = 1.6.dp.toPx(),
                 cap = StrokeCap.Round
             )
         }
