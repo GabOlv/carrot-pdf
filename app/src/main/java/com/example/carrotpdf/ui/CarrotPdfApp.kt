@@ -72,6 +72,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -914,34 +915,33 @@ private fun BoxScope.DrivePageIndicator(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .offset(
-                        y = with(density) {
-                            (thumbCenterY - handleHalfHeightPx).toDp()
-                        }
-                    )
                     .width(handleHitWidth)
-                    .height(handleVisualHeight)
-                    .pointerInput(heightPx) {
+                    .fillMaxHeight()
+                    .pointerInput(heightPx, thumbCenterY) {
                         awaitPointerEventScope {
                             while (true) {
                                 val down = awaitFirstDown(
                                     requireUnconsumed = false,
                                     pass = PointerEventPass.Initial
                                 )
+                                val downY = down.position.y
+                                val isOnThumb = downY in
+                                    (thumbCenterY - handleHalfHeightPx)..(thumbCenterY + handleHalfHeightPx)
+
+                                if (!isOnThumb) {
+                                    continue
+                                }
 
                                 isDragging = true
                                 down.consume()
-                                var lastY = down.position.y
+                                val grabOffsetY = downY - thumbCenterY
 
                                 do {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
 
                                     event.changes.forEach { change ->
                                         if (change.pressed) {
-                                            val deltaY = change.position.y - lastY
-                                            lastY = change.position.y
-
-                                            scrollToThumbPosition(thumbCenterY + deltaY)
+                                            scrollToThumbPosition(change.position.y - grabOffsetY)
                                             change.consume()
                                         }
                                     }
@@ -1339,6 +1339,7 @@ private fun TabSwitcherRow(
     val density = LocalDensity.current
     val reorderThresholdPx = with(density) { 96.dp.toPx() }
     var accumulatedDrag by remember(tab.id) { mutableFloatStateOf(0f) }
+    var visualDragOffset by remember(tab.id) { mutableFloatStateOf(0f) }
     var isReordering by remember(tab.id) { mutableStateOf(false) }
 
     Row(
@@ -1350,6 +1351,7 @@ private fun TabSwitcherRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .offset(y = with(density) { visualDragOffset.toDp() })
                 .scale(if (isReordering) 1.025f else 1f)
                 .shadow(
                     elevation = if (isReordering) 12.dp else 0.dp,
@@ -1435,6 +1437,7 @@ private fun TabSwitcherRow(
 
                                 isReordering = true
                                 accumulatedDrag = 0f
+                                visualDragOffset = 0f
 
                                 while (!wasReleased) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -1446,24 +1449,27 @@ private fun TabSwitcherRow(
                                         break
                                     }
 
-                                    val currentY = change.position.y
-                                    val deltaY = currentY - lastY
-                                    lastY = currentY
+                                    val deltaY = change.positionChange().y
+                                    lastY = change.position.y
 
                                     change.consume()
                                     accumulatedDrag += deltaY
+                                    visualDragOffset += deltaY
 
                                     if (accumulatedDrag > reorderThresholdPx) {
                                         onMove(1)
                                         accumulatedDrag = 0f
+                                        visualDragOffset -= reorderThresholdPx
                                     } else if (accumulatedDrag < -reorderThresholdPx) {
                                         onMove(-1)
                                         accumulatedDrag = 0f
+                                        visualDragOffset += reorderThresholdPx
                                     }
                                 }
 
                                 isReordering = false
                                 accumulatedDrag = 0f
+                                visualDragOffset = 0f
                             }
                         }
                     }
