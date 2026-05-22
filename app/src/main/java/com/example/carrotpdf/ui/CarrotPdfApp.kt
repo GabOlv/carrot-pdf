@@ -59,7 +59,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -159,6 +158,18 @@ private fun CarrotPdfContent(
         }
     }
 
+    fun persistTabsNow() {
+        if (!hasRestoredPersistedTabs) {
+            return
+        }
+
+        PdfTabPersistence.save(
+            context = context.applicationContext,
+            tabs = tabs.toList(),
+            activeTabId = activeTabId
+        )
+    }
+
     fun openTab(uri: Uri, title: String) {
         val existingTab = tabs.firstOrNull { it.uri == uri }
 
@@ -178,6 +189,7 @@ private fun CarrotPdfContent(
 
         closeSearch()
         isChromeVisible = true
+        persistTabsNow()
     }
 
     fun openExternalPdf(uri: Uri) {
@@ -214,6 +226,8 @@ private fun CarrotPdfContent(
             closeSearch()
             isChromeVisible = true
         }
+
+        persistTabsNow()
     }
 
     fun moveTab(tabId: String, direction: Int) {
@@ -231,6 +245,7 @@ private fun CarrotPdfContent(
 
         val tab = tabs.removeAt(fromIndex)
         tabs.add(toIndex, tab)
+        persistTabsNow()
     }
 
     val pdfPicker = rememberLauncherForActivityResult(
@@ -279,43 +294,6 @@ private fun CarrotPdfContent(
         if (hasRestoredPersistedTabs && externalPdfUri != null) {
             openExternalPdf(externalPdfUri)
         }
-    }
-
-    LaunchedEffect(hasRestoredPersistedTabs) {
-        if (!hasRestoredPersistedTabs) {
-            return@LaunchedEffect
-        }
-
-        snapshotFlow {
-            tabs.map { tab ->
-                PersistentTabSnapshot(
-                    id = tab.id,
-                    uri = tab.uri.toString(),
-                    title = tab.title,
-                    currentPageIndex = tab.currentPageIndex,
-                    zoom = tab.zoom
-                )
-            } to activeTabId
-        }
-            .collect { (tabSnapshots, currentActiveTabId) ->
-                val tabsToPersist = tabSnapshots.map { snapshot ->
-                    PdfTab(
-                        id = snapshot.id,
-                        uri = Uri.parse(snapshot.uri),
-                        title = snapshot.title,
-                        currentPageIndex = snapshot.currentPageIndex,
-                        zoom = snapshot.zoom
-                    )
-                }
-
-                withContext(Dispatchers.IO) {
-                    PdfTabPersistence.save(
-                        context = context.applicationContext,
-                        tabs = tabsToPersist,
-                        activeTabId = currentActiveTabId
-                    )
-                }
-            }
     }
 
     LaunchedEffect(activeTabId) {
@@ -423,6 +401,7 @@ private fun CarrotPdfContent(
                             tab.copy(currentPageIndex = pageIndex)
                         }
                     }
+                    persistTabsNow()
                 },
                 onZoomCommitted = { zoom ->
                     updateActiveTab(tabs, activeTabId) { tab ->
@@ -432,6 +411,7 @@ private fun CarrotPdfContent(
                             tab.copy(zoom = zoom)
                         }
                     }
+                    persistTabsNow()
                 }
             )
 
@@ -1991,14 +1971,6 @@ private fun getPdfTitle(
         ?.takeIf { it.isNotBlank() }
         ?: "Document.pdf"
 }
-
-private data class PersistentTabSnapshot(
-    val id: String,
-    val uri: String,
-    val title: String,
-    val currentPageIndex: Int,
-    val zoom: Float
-)
 
 private tailrec fun Context.findActivity(): Activity? {
     return when (this) {

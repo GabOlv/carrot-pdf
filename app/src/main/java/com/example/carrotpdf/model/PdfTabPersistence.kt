@@ -85,6 +85,6 @@ object PdfTabPersistence {
             .edit()
             .putString(KEY_TABS, array.toString())
             .putString(KEY_ACTIVE_TAB_ID, activeTabId)
-            .apply()
+            .commit()
     }
 }
