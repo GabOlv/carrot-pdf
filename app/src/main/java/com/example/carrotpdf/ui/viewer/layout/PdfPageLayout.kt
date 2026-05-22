@@ -21,10 +21,18 @@ fun rememberPdfPageLayout(
     viewportWidth: Dp
 ): PdfPageLayout {
     return remember(viewportWidth) {
-        val horizontalPadding = 12.dp
+        val minimumHorizontalPadding = 12.dp
         val verticalPadding = 14.dp
         val pageSpacing = 14.dp
-        val pageWidth = viewportWidth - (horizontalPadding * 2)
+        val availableWidth = (viewportWidth - (minimumHorizontalPadding * 2))
+            .coerceAtLeast(1.dp)
+        val pageWidth = if (viewportWidth >= TABLET_WIDTH_THRESHOLD) {
+            availableWidth.coerceAtMost(TABLET_READABLE_PAGE_WIDTH)
+        } else {
+            availableWidth
+        }
+        val horizontalPadding = ((viewportWidth - pageWidth) / 2)
+            .coerceAtLeast(minimumHorizontalPadding)
 
         PdfPageLayout(
             viewportWidth = viewportWidth,
@@ -36,3 +44,6 @@ fun rememberPdfPageLayout(
         )
     }
 }
+
+private val TABLET_WIDTH_THRESHOLD = 600.dp
+private val TABLET_READABLE_PAGE_WIDTH = 720.dp
