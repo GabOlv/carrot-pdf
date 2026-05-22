@@ -17,10 +17,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -69,6 +69,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1297,28 +1298,44 @@ private fun TabSwitcherRow(
             }
             Canvas(
                 modifier = Modifier
-                    .size(width = 24.dp, height = 36.dp)
+                    .size(width = 40.dp, height = 44.dp)
                     .pointerInput(tab.id) {
-                        detectVerticalDragGestures(
-                            onDragEnd = {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown(
+                                    requireUnconsumed = false,
+                                    pass = PointerEventPass.Initial
+                                )
+                                down.consume()
                                 accumulatedDrag = 0f
-                            },
-                            onDragCancel = {
-                                accumulatedDrag = 0f
-                            },
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                accumulatedDrag += dragAmount
+                                var lastY = down.position.y
 
-                                if (accumulatedDrag > reorderThresholdPx) {
-                                    onMove(1)
-                                    accumulatedDrag = 0f
-                                } else if (accumulatedDrag < -reorderThresholdPx) {
-                                    onMove(-1)
-                                    accumulatedDrag = 0f
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: break
+
+                                    if (change.changedToUpIgnoreConsumed()) {
+                                        accumulatedDrag = 0f
+                                        break
+                                    }
+
+                                    val currentY = change.position.y
+                                    accumulatedDrag += currentY - lastY
+                                    lastY = currentY
+
+                                    if (accumulatedDrag > reorderThresholdPx) {
+                                        onMove(1)
+                                        accumulatedDrag = 0f
+                                    } else if (accumulatedDrag < -reorderThresholdPx) {
+                                        onMove(-1)
+                                        accumulatedDrag = 0f
+                                    }
+
+                                    change.consume()
                                 }
                             }
-                        )
+                        }
                     }
             ) {
                 val handleColor = Color.White.copy(alpha = 0.38f)
@@ -1327,12 +1344,12 @@ private fun TabSwitcherRow(
                     drawCircle(
                         color = handleColor,
                         radius = 1.35.dp.toPx(),
-                        center = Offset(8.dp.toPx(), y.toPx())
+                        center = Offset(16.dp.toPx(), (y + 4.dp).toPx())
                     )
                     drawCircle(
                         color = handleColor,
                         radius = 1.35.dp.toPx(),
-                        center = Offset(16.dp.toPx(), y.toPx())
+                        center = Offset(24.dp.toPx(), (y + 4.dp).toPx())
                     )
                 }
             }
