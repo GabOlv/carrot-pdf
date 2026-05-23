@@ -10,6 +10,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 
+data class PdfPageScrollTarget(
+    val pageIndex: Int,
+    val normalizedX: Float? = null,
+    val normalizedY: Float? = null
+)
+
 @Stable
 class PdfViewerState(
     val documentId: String,
@@ -24,8 +30,11 @@ class PdfViewerState(
     var currentPageIndex by mutableIntStateOf(coercePageIndex(initialPageIndex))
         private set
 
-    var scrollTargetPage by mutableStateOf<Int?>(null)
+    var scrollTarget by mutableStateOf<PdfPageScrollTarget?>(null)
         private set
+
+    val scrollTargetPage: Int?
+        get() = scrollTarget?.pageIndex
 
     var interactionMode by mutableStateOf(PdfInteractionMode.Idle)
         private set
@@ -151,12 +160,26 @@ class PdfViewerState(
 
     fun requestScrollToPage(pageIndex: Int) {
         val targetPage = coercePageIndex(pageIndex)
-        scrollTargetPage = targetPage
+        scrollTarget = PdfPageScrollTarget(pageIndex = targetPage)
+        interactionMode = PdfInteractionMode.ProgrammaticScroll
+    }
+
+    fun requestScrollToPageLocation(
+        pageIndex: Int,
+        normalizedX: Float?,
+        normalizedY: Float?
+    ) {
+        val targetPage = coercePageIndex(pageIndex)
+        scrollTarget = PdfPageScrollTarget(
+            pageIndex = targetPage,
+            normalizedX = normalizedX?.coerceIn(0f, 1f),
+            normalizedY = normalizedY?.coerceIn(0f, 1f)
+        )
         interactionMode = PdfInteractionMode.ProgrammaticScroll
     }
 
     fun consumeScrollTarget() {
-        scrollTargetPage = null
+        scrollTarget = null
 
         if (interactionMode == PdfInteractionMode.ProgrammaticScroll) {
             interactionMode = PdfInteractionMode.Idle

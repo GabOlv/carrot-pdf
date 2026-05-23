@@ -465,7 +465,7 @@ private fun CarrotPdfContent(
         isSearching = false
 
         results.firstOrNull()?.let { result ->
-            activeViewerState?.requestScrollToPage(result.pageIndex)
+            activeViewerState?.requestScrollToSearchResult(result)
         }
     }
 
@@ -585,7 +585,7 @@ private fun CarrotPdfContent(
                             }
 
                             searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
-                                activeViewerState?.requestScrollToPage(result.pageIndex)
+                                activeViewerState?.requestScrollToSearchResult(result)
                             }
                         }
                     },
@@ -598,7 +598,7 @@ private fun CarrotPdfContent(
                             }
 
                             searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
-                                activeViewerState?.requestScrollToPage(result.pageIndex)
+                                activeViewerState?.requestScrollToSearchResult(result)
                             }
                         }
                     }
@@ -748,6 +748,23 @@ private fun updateActiveTab(
     if (index >= 0) {
         tabs[index] = transform(tabs[index])
     }
+}
+
+private fun PdfViewerState.requestScrollToSearchResult(
+    result: PdfSearchResult
+) {
+    val firstBound = result.bounds.firstOrNull()
+
+    if (firstBound == null || firstBound.pageWidth <= 0f || firstBound.pageHeight <= 0f) {
+        requestScrollToPage(result.pageIndex)
+        return
+    }
+
+    requestScrollToPageLocation(
+        pageIndex = result.pageIndex,
+        normalizedX = ((firstBound.left + firstBound.right) / 2f) / firstBound.pageWidth,
+        normalizedY = ((firstBound.top + firstBound.bottom) / 2f) / firstBound.pageHeight
+    )
 }
 
 private fun getPdfTitle(

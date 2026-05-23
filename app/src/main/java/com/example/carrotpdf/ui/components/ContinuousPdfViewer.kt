@@ -302,17 +302,29 @@ fun ContinuousPdfViewer(
             }
         }
 
-        LaunchedEffect(viewerState.scrollTargetPage) {
-            val target = viewerState.scrollTargetPage
+        LaunchedEffect(viewerState.scrollTarget) {
+            val target = viewerState.scrollTarget
 
-            if (target != null && target in 0 until viewerState.pageCount) {
-                val targetTopPx = documentGeometry.pageFrames
-                    .getOrNull(target)
-                    ?.topPx
-                    ?.coerceIn(0f, maxViewportTopPx)
-                    ?: geometryViewportTop
+            if (target != null && target.pageIndex in 0 until viewerState.pageCount) {
+                val targetFrame = documentGeometry.pageFrames.getOrNull(target.pageIndex)
+                val targetTopPx = if (targetFrame != null && target.normalizedY != null) {
+                    targetFrame.topPx +
+                        (targetFrame.heightPx * target.normalizedY) -
+                        (viewportHeightUnscaled * SEARCH_TARGET_VERTICAL_ANCHOR)
+                } else {
+                    targetFrame?.topPx ?: geometryViewportTop
+                }.coerceIn(0f, maxViewportTopPx)
+
+                val targetLeftPx = if (targetFrame != null && target.normalizedX != null) {
+                    targetFrame.leftPx +
+                        (targetFrame.widthPx * target.normalizedX) -
+                        (viewportWidthUnscaled / 2f)
+                } else {
+                    geometryViewportLeft
+                }
+
                 viewerState.viewportState.setViewportOrigin(
-                    leftPx = geometryViewportLeft,
+                    leftPx = targetLeftPx,
                     topPx = targetTopPx
                 )
                 viewerState.consumeScrollTarget()
@@ -572,6 +584,7 @@ private fun List<PdfSearchResult>.forPage(pageIndex: Int): List<PdfSearchResult>
 
 private const val DEFAULT_PAGE_ASPECT_RATIO = 1.414f
 private const val RENDER_REFINEMENT_DEBOUNCE_MS = 420L
+private const val SEARCH_TARGET_VERTICAL_ANCHOR = 0.35f
 private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
 @Composable
 private fun PageMessage(

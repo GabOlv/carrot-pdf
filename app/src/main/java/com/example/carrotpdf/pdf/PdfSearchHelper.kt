@@ -284,6 +284,13 @@ private class PageTextCollector : PDFTextStripper() {
             return
         }
 
+        textPositions
+            .firstOrNull { position -> position.pageWidth > 0f && position.pageHeight > 0f }
+            ?.let { position ->
+                currentPageWidth = position.pageWidth
+                currentPageHeight = position.pageHeight
+            }
+
         if (textPositions.size == text.length) {
             textPositions.forEachIndexed { index, position ->
                 position.toGlyph(sourceIndex = textStartIndex + index)?.let(currentPageGlyphs::add)
