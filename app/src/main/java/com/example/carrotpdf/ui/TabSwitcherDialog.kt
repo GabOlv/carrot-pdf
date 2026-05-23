@@ -187,7 +187,7 @@ fun TabSwitcherDialog(
 
                 if (tabs.isEmpty()) {
                     Text(
-                        text = "Nenhum PDF estÃ¡ aberto.",
+                        text = "Nenhum PDF está aberto.",
                         color = CarrotColors.TextMuted,
                         modifier = Modifier.padding(vertical = 18.dp)
                     )
@@ -292,7 +292,7 @@ fun TabSwitcherDialog(
                     }
                 ) {
                     Text(
-                        text = "NÃ£o",
+                        text = "Não",
                         color = Color.White.copy(alpha = 0.75f)
                     )
                 }
@@ -359,7 +359,7 @@ fun TabSwitcherRow(
             )
 
             IconButtonCanvas(
-                contentDescription = "Fechar a Aba  ",
+                contentDescription = "Fechar a Aba",
                 onClick = onClose
             ) {
                 drawLine(

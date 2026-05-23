@@ -250,7 +250,7 @@ private fun CarrotPdfContent(
                 .onFailure {
                     Toast.makeText(
                         context,
-                        "NÃ£o foi possÃ­vel criar o PDF das imagens.",
+                        "Não foi possível criar o PDF das imagens.",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
