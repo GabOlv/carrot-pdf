@@ -12,6 +12,8 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.abs
+import kotlin.math.max
 
 data class PdfSearchResult(
     val pageIndex: Int,
@@ -33,11 +35,11 @@ class PdfSearchSession(
     private val uri: Uri
 ) {
     private val pdfBoxIndexMutex = Mutex()
-    private var pdfBoxPageTexts: List<String>? = null
+    private var pdfBoxIndexedPages: List<PdfBoxIndexedPage>? = null
 
     suspend fun warmUp() {
         if (!usesPlatformSearch()) {
-            ensurePdfBoxPageTexts()
+            ensurePdfBoxIndexedPages()
         }
     }
 
@@ -56,33 +58,48 @@ class PdfSearchSession(
             )
         }
 
-        return ensurePdfBoxPageTexts().flatMapIndexed { pageIndex, pageText ->
-            pageText.findMatches(
-                pageIndex = pageIndex,
+        return ensurePdfBoxIndexedPages().flatMap { indexedPage ->
+            indexedPage.findMatches(
                 query = normalizedQuery
             )
         }
     }
 
-    private suspend fun ensurePdfBoxPageTexts(): List<String> {
-        pdfBoxPageTexts?.let { cachedTexts ->
-            return cachedTexts
+    private suspend fun ensurePdfBoxIndexedPages(): List<PdfBoxIndexedPage> {
+        pdfBoxIndexedPages?.let { cachedPages ->
+            return cachedPages
         }
 
         return pdfBoxIndexMutex.withLock {
-            pdfBoxPageTexts?.let { cachedTexts ->
-                return@withLock cachedTexts
+            pdfBoxIndexedPages?.let { cachedPages ->
+                return@withLock cachedPages
             }
 
-            extractPdfBoxPageTexts(
+            extractPdfBoxIndexedPages(
                 context = context,
                 uri = uri
-            ).also { extractedTexts ->
-                pdfBoxPageTexts = extractedTexts
+            ).also { indexedPages ->
+                pdfBoxIndexedPages = indexedPages
             }
         }
     }
 }
+
+private data class PdfBoxIndexedPage(
+    val pageIndex: Int,
+    val text: String,
+    val glyphs: List<PdfBoxGlyph>,
+    val pageWidth: Float,
+    val pageHeight: Float
+)
+
+private data class PdfBoxGlyph(
+    val sourceIndex: Int,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+)
 
 fun searchPdfText(
     context: Context,
@@ -137,21 +154,20 @@ private fun searchPdfTextWithPdfBox(
     uri: Uri,
     query: String
 ): List<PdfSearchResult> {
-    return extractPdfBoxPageTexts(
+    return extractPdfBoxIndexedPages(
         context = context,
         uri = uri
-    ).flatMapIndexed { pageIndex, pageText ->
-        pageText.findMatches(
-            pageIndex = pageIndex,
+    ).flatMap { indexedPage ->
+        indexedPage.findMatches(
             query = query
         )
     }
 }
 
-private fun extractPdfBoxPageTexts(
+private fun extractPdfBoxIndexedPages(
     context: Context,
     uri: Uri
-): List<String> {
+): List<PdfBoxIndexedPage> {
     PDFBoxResourceLoader.init(context.applicationContext)
 
     val inputStream = context.contentResolver.openInputStream(uri) ?: return emptyList()
@@ -161,50 +177,74 @@ private fun extractPdfBoxPageTexts(
             runCatching {
                 PageTextCollector().extract(document)
             }.getOrElse {
-                extractPdfBoxPageTextsOnePageAtATime(document)
+                extractPdfBoxIndexedPagesOnePageAtATime(document)
             }
         }
     }
 }
 
-private fun extractPdfBoxPageTextsOnePageAtATime(
+private fun extractPdfBoxIndexedPagesOnePageAtATime(
     document: PDDocument
-): List<String> {
+): List<PdfBoxIndexedPage> {
     val stripper = PDFTextStripper()
 
     return buildList {
         for (pageIndex in 0 until document.numberOfPages) {
             stripper.startPage = pageIndex + 1
             stripper.endPage = pageIndex + 1
+            val page = document.getPage(pageIndex)
+            val mediaBox = page.mediaBox
 
             add(
-                runCatching {
-                    stripper.getText(document)
-                }.getOrDefault("")
+                PdfBoxIndexedPage(
+                    pageIndex = pageIndex,
+                    text = runCatching {
+                        stripper.getText(document)
+                    }.getOrDefault(""),
+                    glyphs = emptyList(),
+                    pageWidth = mediaBox.width,
+                    pageHeight = mediaBox.height
+                )
             )
         }
     }
 }
 
 private class PageTextCollector : PDFTextStripper() {
-    private val pageTexts = mutableListOf<String>()
+    private val pages = mutableListOf<PdfBoxIndexedPage>()
+    private var currentPageIndex = -1
+    private var currentPageWidth = 0f
+    private var currentPageHeight = 0f
     private var currentPageText = StringBuilder()
+    private var currentPageGlyphs = mutableListOf<PdfBoxGlyph>()
 
-    fun extract(document: PDDocument): List<String> {
+    fun extract(document: PDDocument): List<PdfBoxIndexedPage> {
         sortByPosition = true
         startPage = 1
         endPage = document.numberOfPages
         getText(document)
-        return pageTexts.toList()
+        return pages.toList()
     }
 
     override fun startPage(page: PDPage?) {
+        currentPageIndex += 1
         currentPageText = StringBuilder()
+        currentPageGlyphs = mutableListOf()
+        currentPageWidth = page?.mediaBox?.width ?: 0f
+        currentPageHeight = page?.mediaBox?.height ?: 0f
         super.startPage(page)
     }
 
     override fun endPage(page: PDPage?) {
-        pageTexts.add(currentPageText.toString())
+        pages.add(
+            PdfBoxIndexedPage(
+                pageIndex = currentPageIndex,
+                text = currentPageText.toString(),
+                glyphs = currentPageGlyphs.toList(),
+                pageWidth = currentPageWidth,
+                pageHeight = currentPageHeight
+            )
+        )
         super.endPage(page)
     }
 
@@ -213,17 +253,220 @@ private class PageTextCollector : PDFTextStripper() {
         textPositions: MutableList<TextPosition>?
     ) {
         if (!text.isNullOrEmpty()) {
+            val textStartIndex = currentPageText.length
             currentPageText.append(text)
+            appendGlyphs(
+                text = text,
+                textStartIndex = textStartIndex,
+                textPositions = textPositions.orEmpty()
+            )
         }
 
         super.writeString(text, textPositions)
+    }
+
+    override fun writeWordSeparator() {
+        currentPageText.append(' ')
+        super.writeWordSeparator()
     }
 
     override fun writeLineSeparator() {
         currentPageText.append('\n')
         super.writeLineSeparator()
     }
+
+    private fun appendGlyphs(
+        text: String,
+        textStartIndex: Int,
+        textPositions: List<TextPosition>
+    ) {
+        if (textPositions.isEmpty()) {
+            return
+        }
+
+        if (textPositions.size == text.length) {
+            textPositions.forEachIndexed { index, position ->
+                position.toGlyph(sourceIndex = textStartIndex + index)?.let(currentPageGlyphs::add)
+            }
+            return
+        }
+
+        var sourceIndex = textStartIndex
+        textPositions.forEach { position ->
+            val unicode = position.unicode.orEmpty()
+            val glyphLength = unicode.length.coerceAtLeast(1)
+            val right = sourceIndex + glyphLength
+
+            if (right <= textStartIndex + text.length) {
+                position.toGlyph(sourceIndex = sourceIndex)?.let(currentPageGlyphs::add)
+            }
+
+            sourceIndex = right
+        }
+    }
 }
+
+private fun TextPosition.toGlyph(
+    sourceIndex: Int
+): PdfBoxGlyph? {
+    if (dir != 0f || pageWidth <= 0f || pageHeight <= 0f) {
+        return null
+    }
+
+    val left = xDirAdj
+    val top = yDirAdj
+    val right = left + widthDirAdj
+    val bottom = top + heightDir
+
+    if (
+        !left.isFinite() ||
+        !top.isFinite() ||
+        !right.isFinite() ||
+        !bottom.isFinite() ||
+        right <= left ||
+        bottom <= top
+    ) {
+        return null
+    }
+
+    return PdfBoxGlyph(
+        sourceIndex = sourceIndex,
+        left = left,
+        top = top,
+        right = right,
+        bottom = bottom
+    )
+}
+
+private fun PdfBoxIndexedPage.findMatches(
+    query: String
+): List<PdfSearchResult> {
+    val results = mutableListOf<PdfSearchResult>()
+    var searchFrom = 0
+
+    while (searchFrom < text.length) {
+        val matchIndex = text.indexOf(query, startIndex = searchFrom, ignoreCase = true)
+
+        if (matchIndex < 0) {
+            break
+        }
+
+        results.add(
+            PdfSearchResult(
+                pageIndex = pageIndex,
+                snippet = text.snippetAround(matchIndex, query.length),
+                bounds = boundsForMatch(
+                    matchStart = matchIndex,
+                    matchEnd = matchIndex + query.length
+                )
+            )
+        )
+
+        searchFrom = matchIndex + query.length.coerceAtLeast(1)
+    }
+
+    return results
+}
+
+private fun PdfBoxIndexedPage.boundsForMatch(
+    matchStart: Int,
+    matchEnd: Int
+): List<PdfSearchBounds> {
+    if (pageWidth <= 0f || pageHeight <= 0f || glyphs.isEmpty()) {
+        return emptyList()
+    }
+
+    val matchedGlyphs = glyphs
+        .filter { glyph -> glyph.sourceIndex in matchStart until matchEnd }
+        .filter { glyph -> glyph.hasReliableBounds(pageWidth, pageHeight) }
+
+    if (matchedGlyphs.isEmpty()) {
+        return emptyList()
+    }
+
+    return matchedGlyphs
+        .sortedWith(compareBy<PdfBoxGlyph> { it.top }.thenBy { it.left })
+        .groupIntoVisualLines()
+        .mapNotNull { lineGlyphs ->
+            lineGlyphs.toSearchBounds(
+                pageWidth = pageWidth,
+                pageHeight = pageHeight
+            )
+        }
+}
+
+private fun List<PdfBoxGlyph>.groupIntoVisualLines(): List<List<PdfBoxGlyph>> {
+    return fold(mutableListOf<MutableList<PdfBoxGlyph>>()) { lines, glyph ->
+        val line = lines.lastOrNull()
+        val lineCenter = line?.map { it.centerY }?.average()?.toFloat()
+        val tolerance = max(2f, glyph.height * 0.65f)
+
+        if (line != null && lineCenter != null && abs(glyph.centerY - lineCenter) <= tolerance) {
+            line.add(glyph)
+        } else {
+            lines.add(mutableListOf(glyph))
+        }
+
+        lines
+    }
+}
+
+private fun List<PdfBoxGlyph>.toSearchBounds(
+    pageWidth: Float,
+    pageHeight: Float
+): PdfSearchBounds? {
+    if (isEmpty()) {
+        return null
+    }
+
+    val left = minOf { it.left }.coerceIn(0f, pageWidth)
+    val top = minOf { it.top }.coerceIn(0f, pageHeight)
+    val right = maxOf { it.right }.coerceIn(0f, pageWidth)
+    val bottom = maxOf { it.bottom }.coerceIn(0f, pageHeight)
+
+    if (
+        right <= left ||
+        bottom <= top ||
+        right - left > pageWidth * MAX_MATCH_RECT_WIDTH_RATIO ||
+        bottom - top > pageHeight * MAX_MATCH_RECT_HEIGHT_RATIO
+    ) {
+        return null
+    }
+
+    return PdfSearchBounds(
+        left = left,
+        top = top,
+        right = right,
+        bottom = bottom,
+        pageWidth = pageWidth,
+        pageHeight = pageHeight
+    )
+}
+
+private fun PdfBoxGlyph.hasReliableBounds(
+    pageWidth: Float,
+    pageHeight: Float
+): Boolean {
+    return left.isFinite() &&
+        top.isFinite() &&
+        right.isFinite() &&
+        bottom.isFinite() &&
+        right > left &&
+        bottom > top &&
+        left >= -pageWidth * 0.05f &&
+        right <= pageWidth * 1.05f &&
+        top >= -pageHeight * 0.05f &&
+        bottom <= pageHeight * 1.05f
+}
+
+private val PdfBoxGlyph.centerY: Float
+    get() = (top + bottom) / 2f
+
+private val PdfBoxGlyph.height: Float
+    get() = bottom - top
+
+private const val MAX_MATCH_RECT_WIDTH_RATIO = 0.95f
+private const val MAX_MATCH_RECT_HEIGHT_RATIO = 0.12f
 
 private fun searchPage(
     renderer: PdfRenderer,
