@@ -172,14 +172,11 @@ fun ContinuousPdfViewer(
         }
         val maxViewportTopPx = (documentGeometry.totalHeightPx - viewportHeightUnscaled)
             .coerceAtLeast(0f)
-        val maxViewportLeftPx = (documentGeometry.contentWidthPx - viewportWidthUnscaled)
-            .coerceAtLeast(0f)
         val viewportOrigin = viewportState.viewportOrigin()
         val geometryViewportTop = viewportOrigin.y
             .coerceIn(0f, maxViewportTopPx)
         val geometryViewportBottom = geometryViewportTop + viewportHeightUnscaled
         val geometryViewportLeft = viewportOrigin.x
-            .coerceIn(0f, maxViewportLeftPx)
         val geometryViewportRight = geometryViewportLeft + viewportWidthUnscaled
         val geometryVisiblePages = remember(
             documentGeometry,
@@ -399,7 +396,6 @@ fun ContinuousPdfViewer(
                     val targetTopPx = (targetProgress.coerceIn(0f, 1f) * maxViewportTopPx)
                         .coerceIn(0f, maxViewportTopPx)
                     val currentLeftPx = viewerState.viewportState.viewportOrigin().x
-                        .coerceIn(0f, maxViewportLeftPx)
 
                     viewerState.viewportState.setViewportOrigin(
                         leftPx = currentLeftPx,
