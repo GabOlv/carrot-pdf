@@ -551,7 +551,7 @@ private fun SearchHighlightOverlay(
         results.forEach { result ->
             val isActive = result == activeSearchResult
             val color = if (isActive) {
-                Color(0xCCFFD84D)
+                Color(0xCCFF8A1F)
             } else {
                 Color(0x77FFD84D)
             }

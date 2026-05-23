@@ -426,10 +426,18 @@ private fun List<PdfBoxGlyph>.toSearchBounds(
         return null
     }
 
-    val left = minOf { it.left }.coerceIn(0f, pageWidth)
-    val top = minOf { it.top }.coerceIn(0f, pageHeight)
-    val right = maxOf { it.right }.coerceIn(0f, pageWidth)
-    val bottom = maxOf { it.bottom }.coerceIn(0f, pageHeight)
+    val rawLeft = minOf { it.left }
+    val rawTop = minOf { it.top }
+    val rawRight = maxOf { it.right }
+    val rawBottom = maxOf { it.bottom }
+    val rawHeight = rawBottom - rawTop
+    val verticalShift = rawHeight * PDFBOX_HIGHLIGHT_UPSHIFT_RATIO
+    val verticalInset = rawHeight * PDFBOX_HIGHLIGHT_VERTICAL_INSET_RATIO
+
+    val left = rawLeft.coerceIn(0f, pageWidth)
+    val top = (rawTop - verticalShift + verticalInset).coerceIn(0f, pageHeight)
+    val right = rawRight.coerceIn(0f, pageWidth)
+    val bottom = (rawBottom - verticalShift - verticalInset).coerceIn(0f, pageHeight)
 
     if (
         right <= left ||
@@ -474,6 +482,8 @@ private val PdfBoxGlyph.height: Float
 
 private const val MAX_MATCH_RECT_WIDTH_RATIO = 0.95f
 private const val MAX_MATCH_RECT_HEIGHT_RATIO = 0.12f
+private const val PDFBOX_HIGHLIGHT_UPSHIFT_RATIO = 0.42f
+private const val PDFBOX_HIGHLIGHT_VERTICAL_INSET_RATIO = 0.08f
 
 private fun searchPage(
     renderer: PdfRenderer,
