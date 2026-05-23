@@ -91,13 +91,13 @@ import androidx.lifecycle.LifecycleOwner
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.model.PdfTabPersistence
 import com.example.carrotpdf.pdf.PdfSearchResult
+import com.example.carrotpdf.pdf.PdfSearchSession
 import com.example.carrotpdf.pdf.createPdfFromImages
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
 import com.example.carrotpdf.pdf.getPdfPageSizes
 import com.example.carrotpdf.pdf.printPdf
-import com.example.carrotpdf.pdf.searchPdfText
 import com.example.carrotpdf.pdf.sharePdf
 import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.EmptyState
@@ -158,6 +158,14 @@ private fun CarrotPdfContent(
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val activeViewerState = rememberActiveViewerState(activeTab)
+    val activeSearchSession = remember(activeTab?.id) {
+        activeTab?.let { tab ->
+            PdfSearchSession(
+                context = context.applicationContext,
+                uri = tab.uri
+            )
+        }
+    }
 
     ImmersiveSystemBars(isChromeVisible)
 
@@ -425,11 +433,19 @@ private fun CarrotPdfContent(
         }
     }
 
-    LaunchedEffect(isSearchVisible, searchQuery, activeTab?.id) {
+    LaunchedEffect(isSearchVisible, activeSearchSession) {
+        if (isSearchVisible && activeSearchSession != null) {
+            withContext(Dispatchers.IO) {
+                activeSearchSession.warmUp()
+            }
+        }
+    }
+
+    LaunchedEffect(isSearchVisible, searchQuery, activeTab?.id, activeSearchSession) {
         val tab = activeTab
         val query = searchQuery.trim()
 
-        if (!isSearchVisible || tab == null || query.isBlank()) {
+        if (!isSearchVisible || tab == null || activeSearchSession == null || query.isBlank()) {
             searchResults.clear()
             activeSearchResultIndex = -1
             isSearching = false
@@ -440,11 +456,7 @@ private fun CarrotPdfContent(
         isSearching = true
 
         val results = withContext(Dispatchers.IO) {
-            searchPdfText(
-                context = context.applicationContext,
-                uri = tab.uri,
-                query = query
-            )
+            activeSearchSession.search(query)
         }
 
         searchResults.clear()

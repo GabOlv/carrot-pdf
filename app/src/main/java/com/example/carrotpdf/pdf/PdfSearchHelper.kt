@@ -6,8 +6,12 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.text.TextPosition
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class PdfSearchResult(
     val pageIndex: Int,
@@ -24,6 +28,62 @@ data class PdfSearchBounds(
     val pageHeight: Float
 )
 
+class PdfSearchSession(
+    private val context: Context,
+    private val uri: Uri
+) {
+    private val pdfBoxIndexMutex = Mutex()
+    private var pdfBoxPageTexts: List<String>? = null
+
+    suspend fun warmUp() {
+        if (!usesPlatformSearch()) {
+            ensurePdfBoxPageTexts()
+        }
+    }
+
+    suspend fun search(query: String): List<PdfSearchResult> {
+        val normalizedQuery = query.trim()
+
+        if (normalizedQuery.isBlank()) {
+            return emptyList()
+        }
+
+        if (usesPlatformSearch()) {
+            return searchPdfTextWithPlatform(
+                context = context,
+                uri = uri,
+                query = normalizedQuery
+            )
+        }
+
+        return ensurePdfBoxPageTexts().flatMapIndexed { pageIndex, pageText ->
+            pageText.findMatches(
+                pageIndex = pageIndex,
+                query = normalizedQuery
+            )
+        }
+    }
+
+    private suspend fun ensurePdfBoxPageTexts(): List<String> {
+        pdfBoxPageTexts?.let { cachedTexts ->
+            return cachedTexts
+        }
+
+        return pdfBoxIndexMutex.withLock {
+            pdfBoxPageTexts?.let { cachedTexts ->
+                return@withLock cachedTexts
+            }
+
+            extractPdfBoxPageTexts(
+                context = context,
+                uri = uri
+            ).also { extractedTexts ->
+                pdfBoxPageTexts = extractedTexts
+            }
+        }
+    }
+}
+
 fun searchPdfText(
     context: Context,
     uri: Uri,
@@ -35,7 +95,7 @@ fun searchPdfText(
         return emptyList()
     }
 
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+    if (!usesPlatformSearch()) {
         return searchPdfTextWithPdfBox(
             context = context,
             uri = uri,
@@ -43,13 +103,29 @@ fun searchPdfText(
         )
     }
 
+    return searchPdfTextWithPlatform(
+        context = context,
+        uri = uri,
+        query = normalizedQuery
+    )
+}
+
+private fun usesPlatformSearch(): Boolean {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM
+}
+
+private fun searchPdfTextWithPlatform(
+    context: Context,
+    uri: Uri,
+    query: String
+): List<PdfSearchResult> {
     val fileDescriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: return emptyList()
 
     return fileDescriptor.use { descriptor ->
         PdfRenderer(descriptor).use { renderer ->
             buildList {
                 for (pageIndex in 0 until renderer.pageCount) {
-                    addAll(searchPage(renderer, pageIndex, normalizedQuery))
+                    addAll(searchPage(renderer, pageIndex, query))
                 }
             }
         }
@@ -61,32 +137,91 @@ private fun searchPdfTextWithPdfBox(
     uri: Uri,
     query: String
 ): List<PdfSearchResult> {
+    return extractPdfBoxPageTexts(
+        context = context,
+        uri = uri
+    ).flatMapIndexed { pageIndex, pageText ->
+        pageText.findMatches(
+            pageIndex = pageIndex,
+            query = query
+        )
+    }
+}
+
+private fun extractPdfBoxPageTexts(
+    context: Context,
+    uri: Uri
+): List<String> {
     PDFBoxResourceLoader.init(context.applicationContext)
 
     val inputStream = context.contentResolver.openInputStream(uri) ?: return emptyList()
 
     return inputStream.use { stream ->
         PDDocument.load(stream).use { document ->
-            val stripper = PDFTextStripper()
-
-            buildList {
-                for (pageIndex in 0 until document.numberOfPages) {
-                    stripper.startPage = pageIndex + 1
-                    stripper.endPage = pageIndex + 1
-
-                    val pageText = runCatching {
-                        stripper.getText(document)
-                    }.getOrDefault("")
-
-                    addAll(
-                        pageText.findMatches(
-                            pageIndex = pageIndex,
-                            query = query
-                        )
-                    )
-                }
+            runCatching {
+                PageTextCollector().extract(document)
+            }.getOrElse {
+                extractPdfBoxPageTextsOnePageAtATime(document)
             }
         }
+    }
+}
+
+private fun extractPdfBoxPageTextsOnePageAtATime(
+    document: PDDocument
+): List<String> {
+    val stripper = PDFTextStripper()
+
+    return buildList {
+        for (pageIndex in 0 until document.numberOfPages) {
+            stripper.startPage = pageIndex + 1
+            stripper.endPage = pageIndex + 1
+
+            add(
+                runCatching {
+                    stripper.getText(document)
+                }.getOrDefault("")
+            )
+        }
+    }
+}
+
+private class PageTextCollector : PDFTextStripper() {
+    private val pageTexts = mutableListOf<String>()
+    private var currentPageText = StringBuilder()
+
+    fun extract(document: PDDocument): List<String> {
+        sortByPosition = true
+        startPage = 1
+        endPage = document.numberOfPages
+        getText(document)
+        return pageTexts.toList()
+    }
+
+    override fun startPage(page: PDPage?) {
+        currentPageText = StringBuilder()
+        super.startPage(page)
+    }
+
+    override fun endPage(page: PDPage?) {
+        pageTexts.add(currentPageText.toString())
+        super.endPage(page)
+    }
+
+    override fun writeString(
+        text: String?,
+        textPositions: MutableList<TextPosition>?
+    ) {
+        if (!text.isNullOrEmpty()) {
+            currentPageText.append(text)
+        }
+
+        super.writeString(text, textPositions)
+    }
+
+    override fun writeLineSeparator() {
+        currentPageText.append('\n')
+        super.writeLineSeparator()
     }
 }
 
