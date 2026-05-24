@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
@@ -51,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.pdf.PdfLinkRegion
 import com.example.carrotpdf.pdf.PdfLinkTarget
 import com.example.carrotpdf.pdf.PdfPageSize
+import com.example.carrotpdf.pdf.PdfTextSelection
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.ui.viewer.debug.PdfViewerDebug
@@ -78,8 +80,10 @@ fun ContinuousPdfViewer(
     searchResults: List<PdfSearchResult> = emptyList(),
     activeSearchResultIndex: Int = -1,
     linkRegions: List<PdfLinkRegion> = emptyList(),
+    selectedTextSelection: PdfTextSelection? = null,
     pageSizes: List<PdfPageSize> = emptyList(),
     onLinkTap: (PdfLinkRegion) -> Unit = {},
+    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit = { _, _, _ -> },
     onUserInteraction: () -> Unit = {},
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
@@ -405,7 +409,10 @@ fun ContinuousPdfViewer(
                                 searchResults = searchResults.searchResultsForPage(pageIndex),
                                 activeSearchResult = searchResults.getOrNull(activeSearchResultIndex),
                                 linkRegions = linkRegions.linkRegionsForPage(pageIndex),
-                                onLinkTap = onLinkTap
+                                selectedTextSelection = selectedTextSelection
+                                    ?.takeIf { selection -> selection.pageIndex == pageIndex },
+                                onLinkTap = onLinkTap,
+                                onTextLongPress = onTextLongPress
                             )
                         }
                     }
@@ -442,7 +449,9 @@ private fun PdfPageItem(
     searchResults: List<PdfSearchResult>,
     activeSearchResult: PdfSearchResult?,
     linkRegions: List<PdfLinkRegion>,
-    onLinkTap: (PdfLinkRegion) -> Unit
+    selectedTextSelection: PdfTextSelection?,
+    onLinkTap: (PdfLinkRegion) -> Unit,
+    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit
 ) {
     val renderKey = remember(
         documentId,
@@ -535,6 +544,17 @@ private fun PdfPageItem(
                         modifier = Modifier.fillMaxSize()
                     )
 
+                    TextSelectionOverlay(
+                        selection = selectedTextSelection,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    PdfTextLongPressOverlay(
+                        pageIndex = pageIndex,
+                        onTextLongPress = onTextLongPress,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
                     PdfLinkInteractionOverlay(
                         linkRegions = linkRegions,
                         onLinkTap = onLinkTap,
@@ -605,6 +625,65 @@ private fun List<PdfSearchResult>.searchResultsForPage(pageIndex: Int): List<Pdf
 
 private fun List<PdfLinkRegion>.linkRegionsForPage(pageIndex: Int): List<PdfLinkRegion> {
     return filter { it.pageIndex == pageIndex }
+}
+
+@Composable
+private fun TextSelectionOverlay(
+    selection: PdfTextSelection?,
+    modifier: Modifier = Modifier
+) {
+    if (selection == null || selection.bounds.isEmpty()) {
+        return
+    }
+
+    Canvas(modifier = modifier) {
+        selection.bounds.forEach { bound ->
+            if (bound.pageWidth > 0f && bound.pageHeight > 0f) {
+                val left = (bound.left / bound.pageWidth) * size.width
+                val top = (bound.top / bound.pageHeight) * size.height
+                val right = (bound.right / bound.pageWidth) * size.width
+                val bottom = (bound.bottom / bound.pageHeight) * size.height
+
+                drawRect(
+                    color = Color(0x66FF8A1F),
+                    topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                    size = androidx.compose.ui.geometry.Size(
+                        width = (right - left).coerceAtLeast(2f),
+                        height = (bottom - top).coerceAtLeast(2f)
+                    ),
+                    style = Fill
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PdfTextLongPressOverlay(
+    pageIndex: Int,
+    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.pointerInput(pageIndex) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val longPress = awaitLongPressOrCancellation(down.id)
+                    ?: return@awaitEachGesture
+
+                if (size.width <= 0 || size.height <= 0) {
+                    return@awaitEachGesture
+                }
+
+                onTextLongPress(
+                    pageIndex,
+                    (longPress.position.x / size.width.toFloat()).coerceIn(0f, 1f),
+                    (longPress.position.y / size.height.toFloat()).coerceIn(0f, 1f)
+                )
+                longPress.consume()
+            }
+        }
+    )
 }
 
 @Composable

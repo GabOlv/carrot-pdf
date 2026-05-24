@@ -98,6 +98,8 @@ import com.example.carrotpdf.pdf.PdfLinkSession
 import com.example.carrotpdf.pdf.PdfLinkTarget
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.pdf.PdfSearchSession
+import com.example.carrotpdf.pdf.PdfTextIndexSession
+import com.example.carrotpdf.pdf.PdfTextSelection
 import com.example.carrotpdf.pdf.createPdfFromImages
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.downloadPdf
@@ -163,6 +165,7 @@ private fun CarrotPdfContent(
     var isCreatingImagePdf by remember { mutableStateOf(false) }
     var hasRestoredPersistedTabs by remember { mutableStateOf(false) }
     var selectedExternalLink by remember { mutableStateOf<String?>(null) }
+    var selectedTextSelection by remember { mutableStateOf<PdfTextSelection?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val activeViewerState = rememberActiveViewerState(activeTab)
@@ -182,6 +185,14 @@ private fun CarrotPdfContent(
             )
         }
     }
+    val activeTextIndexSession = remember(activeTab?.id) {
+        activeTab?.let { tab ->
+            PdfTextIndexSession(
+                context = context.applicationContext,
+                uri = tab.uri
+            )
+        }
+    }
 
     ImmersiveSystemBars(isChromeVisible)
 
@@ -192,9 +203,13 @@ private fun CarrotPdfContent(
         activeSearchResultIndex = -1
         isSearching = false
         selectedExternalLink = null
+        selectedTextSelection = null
     }
 
     fun hideChromeForReading() {
+        selectedTextSelection = null
+        selectedExternalLink = null
+
         if (!isSearchVisible) {
             isChromeVisible = false
         }
@@ -374,6 +389,10 @@ private fun CarrotPdfContent(
         isChromeVisible = true
     }
 
+    BackHandler(enabled = selectedTextSelection != null) {
+        selectedTextSelection = null
+    }
+
     DisposableEffect(activity, tabs, activeTabId) {
         val lifecycle = (activity as? LifecycleOwner)?.lifecycle
 
@@ -425,6 +444,7 @@ private fun CarrotPdfContent(
         closeSearch()
         linkRegions.clear()
         selectedExternalLink = null
+        selectedTextSelection = null
 
         val tab = activeTab ?: return@LaunchedEffect
 
@@ -519,6 +539,7 @@ private fun CarrotPdfContent(
                 searchResults = searchResults,
                 activeSearchResultIndex = activeSearchResultIndex,
                 linkRegions = linkRegions,
+                selectedTextSelection = selectedTextSelection,
                 pageSizes = activeTab?.pageSizes.orEmpty(),
                 pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                     DrivePageIndicator(
@@ -543,6 +564,7 @@ private fun CarrotPdfContent(
                     when (val target = link.target) {
                         is PdfLinkTarget.ExternalUri -> {
                             selectedExternalLink = target.uri
+                            selectedTextSelection = null
                             isChromeVisible = true
                             isOverflowOpen = false
                             isTabSwitcherOpen = false
@@ -550,6 +572,7 @@ private fun CarrotPdfContent(
 
                         is PdfLinkTarget.PageDestination -> {
                             selectedExternalLink = null
+                            selectedTextSelection = null
                             isOverflowOpen = false
                             isTabSwitcherOpen = false
                             activeViewerState?.requestScrollToPageLocation(
@@ -560,11 +583,36 @@ private fun CarrotPdfContent(
                         }
 
                         PdfLinkTarget.Unsupported -> {
+                            selectedTextSelection = null
                             Toast.makeText(
                                 context,
                                 "Unsupported PDF link.",
                                 Toast.LENGTH_SHORT
                             ).show()
+                        }
+                    }
+                },
+                onTextLongPress = { pageIndex, normalizedX, normalizedY ->
+                    val session = activeTextIndexSession ?: return@ReaderStage
+                    val tabId = activeTabId
+
+                    selectedExternalLink = null
+                    coroutineScope.launch {
+                        val selection = withContext(Dispatchers.IO) {
+                            runCatching {
+                                session.wordAt(
+                                    pageIndex = pageIndex,
+                                    normalizedX = normalizedX,
+                                    normalizedY = normalizedY
+                                )
+                            }.getOrNull()
+                        }
+
+                        if (activeTabId == tabId && selection != null) {
+                            selectedTextSelection = selection
+                            isChromeVisible = true
+                            isOverflowOpen = false
+                            isTabSwitcherOpen = false
                         }
                     }
                 },
@@ -605,6 +653,8 @@ private fun CarrotPdfContent(
                     },
                     onSearch = {
                         if (activeTab != null) {
+                            selectedTextSelection = null
+                            selectedExternalLink = null
                             isSearchVisible = true
                             isChromeVisible = true
                         }
@@ -810,6 +860,28 @@ private fun CarrotPdfContent(
                     }
                 )
             }
+
+            selectedTextSelection?.let { selection ->
+                TextSelectionDialog(
+                    selection = selection,
+                    onCopy = {
+                        copyTextToClipboard(
+                            context = context,
+                            label = "PDF text",
+                            text = selection.text
+                        )
+                        Toast.makeText(
+                            context,
+                            "Text copied",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        selectedTextSelection = null
+                    },
+                    onDismiss = {
+                        selectedTextSelection = null
+                    }
+                )
+            }
         }
     }
 }
@@ -932,6 +1004,36 @@ private fun ExternalLinkDialog(
                 TextButton(onClick = onDismiss) {
                     Text("Cancel")
                 }
+            }
+        }
+    )
+}
+
+@Composable
+private fun TextSelectionDialog(
+    selection: PdfTextSelection,
+    onCopy: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Copy text")
+        },
+        text = {
+            Text(
+                text = selection.text,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onCopy) {
+                Text("Copy")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
             }
         }
     )
