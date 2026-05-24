@@ -482,8 +482,8 @@ private val PdfBoxGlyph.height: Float
 
 private const val MAX_MATCH_RECT_WIDTH_RATIO = 0.95f
 private const val MAX_MATCH_RECT_HEIGHT_RATIO = 0.12f
-private const val PDFBOX_HIGHLIGHT_UPSHIFT_RATIO = 0.42f
-private const val PDFBOX_HIGHLIGHT_VERTICAL_INSET_RATIO = 0.08f
+private const val PDFBOX_HIGHLIGHT_UPSHIFT_RATIO = 0.92f
+private const val PDFBOX_HIGHLIGHT_VERTICAL_INSET_RATIO = 0.06f
 
 private fun searchPage(
     renderer: PdfRenderer,
