@@ -1,6 +1,9 @@
 ﻿package com.example.carrotpdf.ui
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -90,6 +93,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.model.PdfTabPersistence
+import com.example.carrotpdf.pdf.PdfLinkRegion
+import com.example.carrotpdf.pdf.PdfLinkSession
+import com.example.carrotpdf.pdf.PdfLinkTarget
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.pdf.PdfSearchSession
 import com.example.carrotpdf.pdf.createPdfFromImages
@@ -143,6 +149,7 @@ private fun CarrotPdfContent(
         .calculateBottomPadding()
     val tabs = remember { mutableStateListOf<PdfTab>() }
     val searchResults = remember { mutableStateListOf<PdfSearchResult>() }
+    val linkRegions = remember { mutableStateListOf<PdfLinkRegion>() }
 
     var activeTabId by remember { mutableStateOf<String?>(null) }
     var isChromeVisible by remember { mutableStateOf(true) }
@@ -155,12 +162,21 @@ private fun CarrotPdfContent(
     var isLoadingDocument by remember { mutableStateOf(false) }
     var isCreatingImagePdf by remember { mutableStateOf(false) }
     var hasRestoredPersistedTabs by remember { mutableStateOf(false) }
+    var selectedExternalLink by remember { mutableStateOf<String?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val activeViewerState = rememberActiveViewerState(activeTab)
     val activeSearchSession = remember(activeTab?.id) {
         activeTab?.let { tab ->
             PdfSearchSession(
+                context = context.applicationContext,
+                uri = tab.uri
+            )
+        }
+    }
+    val activeLinkSession = remember(activeTab?.id) {
+        activeTab?.let { tab ->
+            PdfLinkSession(
                 context = context.applicationContext,
                 uri = tab.uri
             )
@@ -175,6 +191,7 @@ private fun CarrotPdfContent(
         searchResults.clear()
         activeSearchResultIndex = -1
         isSearching = false
+        selectedExternalLink = null
     }
 
     fun hideChromeForReading() {
@@ -406,6 +423,8 @@ private fun CarrotPdfContent(
 
     LaunchedEffect(activeTabId) {
         closeSearch()
+        linkRegions.clear()
+        selectedExternalLink = null
 
         val tab = activeTab ?: return@LaunchedEffect
 
@@ -431,6 +450,21 @@ private fun CarrotPdfContent(
                 }
             }
         }
+    }
+
+    LaunchedEffect(activeTab?.id, activeLinkSession) {
+        linkRegions.clear()
+        selectedExternalLink = null
+
+        val session = activeLinkSession ?: return@LaunchedEffect
+        val links = withContext(Dispatchers.IO) {
+            runCatching {
+                session.links()
+            }.getOrDefault(emptyList())
+        }
+
+        linkRegions.clear()
+        linkRegions.addAll(links)
     }
 
     LaunchedEffect(isSearchVisible, activeSearchSession) {
@@ -484,6 +518,7 @@ private fun CarrotPdfContent(
                 isLoadingDocument = isLoadingDocument,
                 searchResults = searchResults,
                 activeSearchResultIndex = activeSearchResultIndex,
+                linkRegions = linkRegions,
                 pageSizes = activeTab?.pageSizes.orEmpty(),
                 pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                     DrivePageIndicator(
@@ -503,6 +538,16 @@ private fun CarrotPdfContent(
                 },
                 onRevealChrome = {
                     isChromeVisible = true
+                },
+                onLinkTap = { link ->
+                    when (val target = link.target) {
+                        is PdfLinkTarget.ExternalUri -> {
+                            selectedExternalLink = target.uri
+                            isChromeVisible = true
+                            isOverflowOpen = false
+                            isTabSwitcherOpen = false
+                        }
+                    }
                 },
                 onUserInteraction = ::hideChromeForReading,
                 onCurrentPageChange = { pageIndex ->
@@ -718,6 +763,34 @@ private fun CarrotPdfContent(
                     }
                 )
             }
+
+            selectedExternalLink?.let { link ->
+                ExternalLinkDialog(
+                    uri = link,
+                    onCopy = {
+                        copyTextToClipboard(
+                            context = context,
+                            label = "PDF link",
+                            text = link
+                        )
+                        Toast.makeText(
+                            context,
+                            "Link copied",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    onOpen = {
+                        selectedExternalLink = null
+                        openExternalUri(
+                            context = context,
+                            uri = link
+                        )
+                    },
+                    onDismiss = {
+                        selectedExternalLink = null
+                    }
+                )
+            }
         }
     }
 }
@@ -805,6 +878,75 @@ tailrec fun Context.findActivity(): Activity? {
         is Activity -> this
         is ContextWrapper -> baseContext.findActivity()
         else -> null
+    }
+}
+
+@Composable
+private fun ExternalLinkDialog(
+    uri: String,
+    onCopy: () -> Unit,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("PDF link")
+        },
+        text = {
+            Text(
+                text = uri,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onOpen) {
+                Text("Open")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onCopy) {
+                    Text("Copy")
+                }
+
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        }
+    )
+}
+
+private fun copyTextToClipboard(
+    context: Context,
+    label: String,
+    text: String
+) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        ?: return
+
+    clipboard.setPrimaryClip(
+        ClipData.newPlainText(label, text)
+    )
+}
+
+private fun openExternalUri(
+    context: Context,
+    uri: String
+) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(
+            context,
+            "No app can open this link.",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }
 

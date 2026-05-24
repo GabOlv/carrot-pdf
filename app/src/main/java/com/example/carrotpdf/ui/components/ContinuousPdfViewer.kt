@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
@@ -34,13 +36,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.example.carrotpdf.pdf.PdfLinkRegion
+import com.example.carrotpdf.pdf.PdfLinkTarget
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.pdf.PdfSearchResult
@@ -68,7 +77,9 @@ fun ContinuousPdfViewer(
     onZoomCommitted: (Float) -> Unit,
     searchResults: List<PdfSearchResult> = emptyList(),
     activeSearchResultIndex: Int = -1,
+    linkRegions: List<PdfLinkRegion> = emptyList(),
     pageSizes: List<PdfPageSize> = emptyList(),
+    onLinkTap: (PdfLinkRegion) -> Unit = {},
     onUserInteraction: () -> Unit = {},
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
@@ -391,8 +402,10 @@ fun ContinuousPdfViewer(
                                 pageWidth = pageWidth,
                                 pageAspectRatio = pageSizes.getOrNull(pageIndex)?.aspectRatio,
                                 renderQualityScale = viewerState.renderQualityScale,
-                                searchResults = searchResults.forPage(pageIndex),
-                                activeSearchResult = searchResults.getOrNull(activeSearchResultIndex)
+                                searchResults = searchResults.searchResultsForPage(pageIndex),
+                                activeSearchResult = searchResults.getOrNull(activeSearchResultIndex),
+                                linkRegions = linkRegions.linkRegionsForPage(pageIndex),
+                                onLinkTap = onLinkTap
                             )
                         }
                     }
@@ -427,7 +440,9 @@ private fun PdfPageItem(
     pageAspectRatio: Float?,
     renderQualityScale: Float,
     searchResults: List<PdfSearchResult>,
-    activeSearchResult: PdfSearchResult?
+    activeSearchResult: PdfSearchResult?,
+    linkRegions: List<PdfLinkRegion>,
+    onLinkTap: (PdfLinkRegion) -> Unit
 ) {
     val renderKey = remember(
         documentId,
@@ -519,6 +534,12 @@ private fun PdfPageItem(
                         activeSearchResult = activeSearchResult,
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    PdfLinkInteractionOverlay(
+                        linkRegions = linkRegions,
+                        onLinkTap = onLinkTap,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
 
@@ -578,14 +599,146 @@ private fun SearchHighlightOverlay(
     }
 }
 
-private fun List<PdfSearchResult>.forPage(pageIndex: Int): List<PdfSearchResult> {
+private fun List<PdfSearchResult>.searchResultsForPage(pageIndex: Int): List<PdfSearchResult> {
     return filter { it.pageIndex == pageIndex }
+}
+
+private fun List<PdfLinkRegion>.linkRegionsForPage(pageIndex: Int): List<PdfLinkRegion> {
+    return filter { it.pageIndex == pageIndex }
+}
+
+@Composable
+private fun PdfLinkInteractionOverlay(
+    linkRegions: List<PdfLinkRegion>,
+    onLinkTap: (PdfLinkRegion) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (linkRegions.isEmpty()) {
+        return
+    }
+
+    val viewConfiguration = LocalViewConfiguration.current
+    val hapticFeedback = LocalHapticFeedback.current
+    var selectedLink by remember(linkRegions) {
+        mutableStateOf<PdfLinkRegion?>(null)
+    }
+    var selectedAtMillis by remember(linkRegions) {
+        mutableStateOf(0L)
+    }
+
+    Box(
+        modifier = modifier.pointerInput(linkRegions) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val downLink = linkRegions.hitTestLink(
+                    x = down.position.x,
+                    y = down.position.y,
+                    width = size.width.toFloat(),
+                    height = size.height.toFloat()
+                ) ?: return@awaitEachGesture
+
+                val downPosition = down.position
+                val downTime = down.uptimeMillis
+                var hasMoved = false
+                var hasMultiplePointers = false
+                var wasTapLike = true
+                var upLink: PdfLinkRegion? = null
+
+                do {
+                    val event = awaitPointerEvent()
+                    val pressedChanges = event.changes.filter { change -> change.pressed }
+
+                    if (pressedChanges.size > 1) {
+                        hasMultiplePointers = true
+                    }
+
+                    event.changes.firstOrNull { change -> change.id == down.id }?.let { change ->
+                        if ((change.position - downPosition).getDistance() > viewConfiguration.touchSlop) {
+                            hasMoved = true
+                        }
+
+                        if (change.changedToUpIgnoreConsumed()) {
+                            wasTapLike = change.uptimeMillis - downTime <= LINK_TAP_MAX_DURATION_MS
+                            upLink = linkRegions.hitTestLink(
+                                x = change.position.x,
+                                y = change.position.y,
+                                width = size.width.toFloat(),
+                                height = size.height.toFloat()
+                            )
+
+                            if (
+                                !hasMoved &&
+                                !hasMultiplePointers &&
+                                wasTapLike &&
+                                upLink != null
+                            ) {
+                                down.consume()
+                                change.consume()
+                            }
+                        }
+                    }
+                } while (event.changes.any { change -> change.pressed })
+
+                if (!hasMoved && !hasMultiplePointers && wasTapLike) {
+                    val tappedLink = upLink
+
+                    if (tappedLink != null && tappedLink.target == downLink.target) {
+                        val selected = selectedLink
+                        val isSameSelection = selected != null && selected.target == tappedLink.target
+                        val isWithinDoubleTapWindow = downTime - selectedAtMillis <= LINK_DOUBLE_TAP_WINDOW_MS
+
+                        if (isSameSelection && isWithinDoubleTapWindow) {
+                            selectedLink = null
+                            selectedAtMillis = 0L
+                            onLinkTap(tappedLink)
+                        } else {
+                            selectedLink = tappedLink
+                            selectedAtMillis = downTime
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
+                    }
+                } else if (hasMoved || hasMultiplePointers) {
+                    selectedLink = null
+                    selectedAtMillis = 0L
+                }
+            }
+        }
+    )
+}
+
+private fun List<PdfLinkRegion>.hitTestLink(
+    x: Float,
+    y: Float,
+    width: Float,
+    height: Float
+): PdfLinkRegion? {
+    if (width <= 0f || height <= 0f) {
+        return null
+    }
+
+    return firstOrNull { link ->
+        link.target is PdfLinkTarget.ExternalUri &&
+            link.bounds.any { bound ->
+                if (bound.pageWidth <= 0f || bound.pageHeight <= 0f) {
+                    false
+                } else {
+                    val left = (bound.left / bound.pageWidth) * width
+                    val top = (bound.top / bound.pageHeight) * height
+                    val right = (bound.right / bound.pageWidth) * width
+                    val bottom = (bound.bottom / bound.pageHeight) * height
+
+                    x in left..right && y in top..bottom
+                }
+            }
+    }
 }
 
 private const val DEFAULT_PAGE_ASPECT_RATIO = 1.414f
 private const val RENDER_REFINEMENT_DEBOUNCE_MS = 420L
 private const val SEARCH_TARGET_VERTICAL_ANCHOR = 0.35f
 private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
+private const val LINK_TAP_MAX_DURATION_MS = 700L
+private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
 @Composable
 private fun PageMessage(
     text: String

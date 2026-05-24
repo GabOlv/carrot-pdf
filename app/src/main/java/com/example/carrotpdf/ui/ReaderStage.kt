@@ -90,6 +90,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.model.PdfTabPersistence
+import com.example.carrotpdf.pdf.PdfLinkRegion
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.pdf.createPdfFromImages
 import com.example.carrotpdf.pdf.PdfPageSize
@@ -118,6 +119,7 @@ fun ReaderStage(
     isLoadingDocument: Boolean,
     searchResults: List<PdfSearchResult>,
     activeSearchResultIndex: Int,
+    linkRegions: List<PdfLinkRegion>,
     pageSizes: List<PdfPageSize>,
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
@@ -129,6 +131,7 @@ fun ReaderStage(
     onOpenPdf: () -> Unit,
     onToggleChrome: () -> Unit,
     onRevealChrome: () -> Unit,
+    onLinkTap: (PdfLinkRegion) -> Unit,
     onUserInteraction: () -> Unit,
     onCurrentPageChange: (Int) -> Unit,
     onZoomCommitted: (Float) -> Unit
@@ -166,7 +169,9 @@ fun ReaderStage(
                     onZoomCommitted = onZoomCommitted,
                     searchResults = searchResults,
                     activeSearchResultIndex = activeSearchResultIndex,
+                    linkRegions = linkRegions,
                     pageSizes = pageSizes,
+                    onLinkTap = onLinkTap,
                     onUserInteraction = onUserInteraction,
                     pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                         pageIndicatorContent(
