@@ -547,6 +547,25 @@ private fun CarrotPdfContent(
                             isOverflowOpen = false
                             isTabSwitcherOpen = false
                         }
+
+                        is PdfLinkTarget.PageDestination -> {
+                            selectedExternalLink = null
+                            isOverflowOpen = false
+                            isTabSwitcherOpen = false
+                            activeViewerState?.requestScrollToPageLocation(
+                                pageIndex = target.pageIndex,
+                                normalizedX = target.normalizedX,
+                                normalizedY = target.normalizedY
+                            )
+                        }
+
+                        PdfLinkTarget.Unsupported -> {
+                            Toast.makeText(
+                                context,
+                                "Unsupported PDF link.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 },
                 onUserInteraction = ::hideChromeForReading,

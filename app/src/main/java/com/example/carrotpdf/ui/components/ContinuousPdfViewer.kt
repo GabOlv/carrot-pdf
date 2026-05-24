@@ -717,7 +717,7 @@ private fun List<PdfLinkRegion>.hitTestLink(
     }
 
     return firstOrNull { link ->
-        link.target is PdfLinkTarget.ExternalUri &&
+        link.target != PdfLinkTarget.Unsupported &&
             link.bounds.any { bound ->
                 if (bound.pageWidth <= 0f || bound.pageHeight <= 0f) {
                     false

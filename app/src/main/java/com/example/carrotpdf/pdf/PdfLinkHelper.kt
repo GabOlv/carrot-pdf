@@ -6,8 +6,17 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionGoTo
 import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionURI
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDNamedDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitHeightDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitRectangleDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitWidthDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageXYZDestination
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Locale
@@ -29,6 +38,13 @@ data class PdfLinkBounds(
 
 sealed class PdfLinkTarget {
     data class ExternalUri(val uri: String) : PdfLinkTarget()
+    data class PageDestination(
+        val pageIndex: Int,
+        val normalizedX: Float? = null,
+        val normalizedY: Float? = null
+    ) : PdfLinkTarget()
+
+    data object Unsupported : PdfLinkTarget()
 }
 
 class PdfLinkSession(
@@ -73,7 +89,8 @@ fun extractPdfLinks(
                     val page = document.getPage(pageIndex)
 
                     addAll(
-                        page.externalUriLinkRegions(
+                        page.linkRegions(
+                            document = document,
                             pageIndex = pageIndex
                         )
                     )
@@ -83,7 +100,8 @@ fun extractPdfLinks(
     }
 }
 
-private fun PDPage.externalUriLinkRegions(
+private fun PDPage.linkRegions(
+    document: PDDocument,
     pageIndex: Int
 ): List<PdfLinkRegion> {
     if (rotation != 0) {
@@ -99,8 +117,8 @@ private fun PDPage.externalUriLinkRegions(
     return runCatching {
         annotations.mapNotNull { annotation ->
             val link = annotation as? PDAnnotationLink ?: return@mapNotNull null
-            val action = link.action as? PDActionURI ?: return@mapNotNull null
-            val safeUri = action.uri?.trim()?.takeIf(::isSafeExternalUri)
+            val target = link.linkTarget(document)
+                ?.takeIf { target -> target != PdfLinkTarget.Unsupported }
                 ?: return@mapNotNull null
             val bounds = link.linkBounds(pageBox)
 
@@ -110,11 +128,116 @@ private fun PDPage.externalUriLinkRegions(
                 PdfLinkRegion(
                     pageIndex = pageIndex,
                     bounds = bounds,
-                    target = PdfLinkTarget.ExternalUri(safeUri)
+                    target = target
                 )
             }
         }
     }.getOrDefault(emptyList())
+}
+
+private fun PDAnnotationLink.linkTarget(
+    document: PDDocument
+): PdfLinkTarget? {
+    val action = action
+
+    if (action is PDActionURI) {
+        val safeUri = action.uri?.trim()?.takeIf(::isSafeExternalUri)
+
+        return if (safeUri == null) {
+            PdfLinkTarget.Unsupported
+        } else {
+            PdfLinkTarget.ExternalUri(safeUri)
+        }
+    }
+
+    if (action is PDActionGoTo) {
+        return runCatching {
+            action.destination.toPageDestinationTarget(document)
+        }.getOrNull() ?: PdfLinkTarget.Unsupported
+    }
+
+    return runCatching {
+        destination.toPageDestinationTarget(document)
+    }.getOrNull()
+}
+
+private fun PDDestination?.toPageDestinationTarget(
+    document: PDDocument
+): PdfLinkTarget.PageDestination? {
+    return when (this) {
+        is PDPageDestination -> toPageDestinationTarget(document)
+        is PDNamedDestination -> resolveNamedDestination(
+            document = document,
+            name = namedDestination
+        )?.toPageDestinationTarget(document)
+        else -> null
+    }
+}
+
+private fun PDPageDestination.toPageDestinationTarget(
+    document: PDDocument
+): PdfLinkTarget.PageDestination? {
+    val pageIndex = retrievePageNumber()
+
+    if (pageIndex !in 0 until document.numberOfPages) {
+        return null
+    }
+
+    val page = document.getPage(pageIndex)
+    val pageBox = page.cropBox ?: page.mediaBox ?: return null
+
+    return PdfLinkTarget.PageDestination(
+        pageIndex = pageIndex,
+        normalizedX = destinationNormalizedX(pageBox),
+        normalizedY = destinationNormalizedY(pageBox)
+    )
+}
+
+private fun resolveNamedDestination(
+    document: PDDocument,
+    name: String?
+): PDPageDestination? {
+    if (name.isNullOrBlank()) {
+        return null
+    }
+
+    val catalog = document.documentCatalog
+
+    return runCatching {
+        catalog.dests?.getDestination(name) as? PDPageDestination
+    }.getOrNull()
+        ?: runCatching {
+            catalog.names?.dests?.getValue(name)
+        }.getOrNull()
+}
+
+private fun PDPageDestination.destinationNormalizedX(
+    pageBox: PDRectangle
+): Float? {
+    val left = when (this) {
+        is PDPageXYZDestination -> getLeft().takeIf { value -> value > 0 }
+        is PDPageFitHeightDestination -> getLeft().takeIf { value -> value >= 0 }
+        is PDPageFitRectangleDestination -> getLeft().takeIf { value -> value >= 0 }
+        else -> null
+    } ?: return null
+
+    return ((left - pageBox.lowerLeftX) / pageBox.width).coerceIn(0f, 1f)
+}
+
+private fun PDPageDestination.destinationNormalizedY(
+    pageBox: PDRectangle
+): Float? {
+    val top = when (this) {
+        is PDPageXYZDestination -> getTop().takeIf { value -> value > 0 }
+        is PDPageFitWidthDestination -> getTop().takeIf { value -> value >= 0 }
+        is PDPageFitRectangleDestination -> getTop().takeIf { value -> value >= 0 }
+        is PDPageFitDestination -> null
+        else -> null
+    } ?: return null
+
+    return (pageBox.height - (top - pageBox.lowerLeftY))
+        .div(pageBox.height)
+        .coerceIn(0f, 1f)
 }
 
 private fun PDAnnotationLink.linkBounds(
