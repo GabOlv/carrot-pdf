@@ -5,13 +5,6 @@ import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.pdmodel.PDPage
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
-import com.tom_roush.pdfbox.text.TextPosition
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -34,12 +27,14 @@ class PdfSearchSession(
     private val context: Context,
     private val uri: Uri
 ) {
-    private val pdfBoxIndexMutex = Mutex()
-    private var pdfBoxIndexedPages: List<PdfBoxIndexedPage>? = null
+    private val textIndexSession = PdfTextIndexSession(
+        context = context,
+        uri = uri
+    )
 
     suspend fun warmUp() {
         if (!usesPlatformSearch()) {
-            ensurePdfBoxIndexedPages()
+            textIndexSession.warmUp()
         }
     }
 
@@ -58,48 +53,13 @@ class PdfSearchSession(
             )
         }
 
-        return ensurePdfBoxIndexedPages().flatMap { indexedPage ->
+        return textIndexSession.pages().flatMap { indexedPage ->
             indexedPage.findMatches(
                 query = normalizedQuery
             )
         }
     }
-
-    private suspend fun ensurePdfBoxIndexedPages(): List<PdfBoxIndexedPage> {
-        pdfBoxIndexedPages?.let { cachedPages ->
-            return cachedPages
-        }
-
-        return pdfBoxIndexMutex.withLock {
-            pdfBoxIndexedPages?.let { cachedPages ->
-                return@withLock cachedPages
-            }
-
-            extractPdfBoxIndexedPages(
-                context = context,
-                uri = uri
-            ).also { indexedPages ->
-                pdfBoxIndexedPages = indexedPages
-            }
-        }
-    }
 }
-
-private data class PdfBoxIndexedPage(
-    val pageIndex: Int,
-    val text: String,
-    val glyphs: List<PdfBoxGlyph>,
-    val pageWidth: Float,
-    val pageHeight: Float
-)
-
-private data class PdfBoxGlyph(
-    val sourceIndex: Int,
-    val left: Float,
-    val top: Float,
-    val right: Float,
-    val bottom: Float
-)
 
 fun searchPdfText(
     context: Context,
@@ -154,7 +114,7 @@ private fun searchPdfTextWithPdfBox(
     uri: Uri,
     query: String
 ): List<PdfSearchResult> {
-    return extractPdfBoxIndexedPages(
+    return extractPdfTextIndex(
         context = context,
         uri = uri
     ).flatMap { indexedPage ->
@@ -164,188 +124,7 @@ private fun searchPdfTextWithPdfBox(
     }
 }
 
-private fun extractPdfBoxIndexedPages(
-    context: Context,
-    uri: Uri
-): List<PdfBoxIndexedPage> {
-    PDFBoxResourceLoader.init(context.applicationContext)
-
-    val inputStream = context.contentResolver.openInputStream(uri) ?: return emptyList()
-
-    return inputStream.use { stream ->
-        PDDocument.load(stream).use { document ->
-            runCatching {
-                PageTextCollector().extract(document)
-            }.getOrElse {
-                extractPdfBoxIndexedPagesOnePageAtATime(document)
-            }
-        }
-    }
-}
-
-private fun extractPdfBoxIndexedPagesOnePageAtATime(
-    document: PDDocument
-): List<PdfBoxIndexedPage> {
-    val stripper = PDFTextStripper()
-
-    return buildList {
-        for (pageIndex in 0 until document.numberOfPages) {
-            stripper.startPage = pageIndex + 1
-            stripper.endPage = pageIndex + 1
-            val page = document.getPage(pageIndex)
-            val mediaBox = page.mediaBox
-
-            add(
-                PdfBoxIndexedPage(
-                    pageIndex = pageIndex,
-                    text = runCatching {
-                        stripper.getText(document)
-                    }.getOrDefault(""),
-                    glyphs = emptyList(),
-                    pageWidth = mediaBox.width,
-                    pageHeight = mediaBox.height
-                )
-            )
-        }
-    }
-}
-
-private class PageTextCollector : PDFTextStripper() {
-    private val pages = mutableListOf<PdfBoxIndexedPage>()
-    private var currentPageIndex = -1
-    private var currentPageWidth = 0f
-    private var currentPageHeight = 0f
-    private var currentPageText = StringBuilder()
-    private var currentPageGlyphs = mutableListOf<PdfBoxGlyph>()
-
-    fun extract(document: PDDocument): List<PdfBoxIndexedPage> {
-        sortByPosition = true
-        startPage = 1
-        endPage = document.numberOfPages
-        getText(document)
-        return pages.toList()
-    }
-
-    override fun startPage(page: PDPage?) {
-        currentPageIndex += 1
-        currentPageText = StringBuilder()
-        currentPageGlyphs = mutableListOf()
-        currentPageWidth = page?.mediaBox?.width ?: 0f
-        currentPageHeight = page?.mediaBox?.height ?: 0f
-        super.startPage(page)
-    }
-
-    override fun endPage(page: PDPage?) {
-        pages.add(
-            PdfBoxIndexedPage(
-                pageIndex = currentPageIndex,
-                text = currentPageText.toString(),
-                glyphs = currentPageGlyphs.toList(),
-                pageWidth = currentPageWidth,
-                pageHeight = currentPageHeight
-            )
-        )
-        super.endPage(page)
-    }
-
-    override fun writeString(
-        text: String?,
-        textPositions: MutableList<TextPosition>?
-    ) {
-        if (!text.isNullOrEmpty()) {
-            val textStartIndex = currentPageText.length
-            currentPageText.append(text)
-            appendGlyphs(
-                text = text,
-                textStartIndex = textStartIndex,
-                textPositions = textPositions.orEmpty()
-            )
-        }
-
-        super.writeString(text, textPositions)
-    }
-
-    override fun writeWordSeparator() {
-        currentPageText.append(' ')
-        super.writeWordSeparator()
-    }
-
-    override fun writeLineSeparator() {
-        currentPageText.append('\n')
-        super.writeLineSeparator()
-    }
-
-    private fun appendGlyphs(
-        text: String,
-        textStartIndex: Int,
-        textPositions: List<TextPosition>
-    ) {
-        if (textPositions.isEmpty()) {
-            return
-        }
-
-        textPositions
-            .firstOrNull { position -> position.pageWidth > 0f && position.pageHeight > 0f }
-            ?.let { position ->
-                currentPageWidth = position.pageWidth
-                currentPageHeight = position.pageHeight
-            }
-
-        if (textPositions.size == text.length) {
-            textPositions.forEachIndexed { index, position ->
-                position.toGlyph(sourceIndex = textStartIndex + index)?.let(currentPageGlyphs::add)
-            }
-            return
-        }
-
-        var sourceIndex = textStartIndex
-        textPositions.forEach { position ->
-            val unicode = position.unicode.orEmpty()
-            val glyphLength = unicode.length.coerceAtLeast(1)
-            val right = sourceIndex + glyphLength
-
-            if (right <= textStartIndex + text.length) {
-                position.toGlyph(sourceIndex = sourceIndex)?.let(currentPageGlyphs::add)
-            }
-
-            sourceIndex = right
-        }
-    }
-}
-
-private fun TextPosition.toGlyph(
-    sourceIndex: Int
-): PdfBoxGlyph? {
-    if (dir != 0f || pageWidth <= 0f || pageHeight <= 0f) {
-        return null
-    }
-
-    val left = xDirAdj
-    val top = yDirAdj
-    val right = left + widthDirAdj
-    val bottom = top + heightDir
-
-    if (
-        !left.isFinite() ||
-        !top.isFinite() ||
-        !right.isFinite() ||
-        !bottom.isFinite() ||
-        right <= left ||
-        bottom <= top
-    ) {
-        return null
-    }
-
-    return PdfBoxGlyph(
-        sourceIndex = sourceIndex,
-        left = left,
-        top = top,
-        right = right,
-        bottom = bottom
-    )
-}
-
-private fun PdfBoxIndexedPage.findMatches(
+private fun PdfTextIndexedPage.findMatches(
     query: String
 ): List<PdfSearchResult> {
     val results = mutableListOf<PdfSearchResult>()
@@ -375,7 +154,7 @@ private fun PdfBoxIndexedPage.findMatches(
     return results
 }
 
-private fun PdfBoxIndexedPage.boundsForMatch(
+private fun PdfTextIndexedPage.boundsForMatch(
     matchStart: Int,
     matchEnd: Int
 ): List<PdfSearchBounds> {
@@ -392,18 +171,18 @@ private fun PdfBoxIndexedPage.boundsForMatch(
     }
 
     return matchedGlyphs
-        .sortedWith(compareBy<PdfBoxGlyph> { it.top }.thenBy { it.left })
+        .sortedWith(compareBy<PdfTextGlyph> { it.top }.thenBy { it.left })
         .groupIntoVisualLines()
         .mapNotNull { lineGlyphs ->
             lineGlyphs.toSearchBounds(
                 pageWidth = pageWidth,
                 pageHeight = pageHeight
             )
-        }
+    }
 }
 
-private fun List<PdfBoxGlyph>.groupIntoVisualLines(): List<List<PdfBoxGlyph>> {
-    return fold(mutableListOf<MutableList<PdfBoxGlyph>>()) { lines, glyph ->
+private fun List<PdfTextGlyph>.groupIntoVisualLines(): List<List<PdfTextGlyph>> {
+    return fold(mutableListOf<MutableList<PdfTextGlyph>>()) { lines, glyph ->
         val line = lines.lastOrNull()
         val lineCenter = line?.map { it.centerY }?.average()?.toFloat()
         val tolerance = max(2f, glyph.height * 0.65f)
@@ -418,7 +197,7 @@ private fun List<PdfBoxGlyph>.groupIntoVisualLines(): List<List<PdfBoxGlyph>> {
     }
 }
 
-private fun List<PdfBoxGlyph>.toSearchBounds(
+private fun List<PdfTextGlyph>.toSearchBounds(
     pageWidth: Float,
     pageHeight: Float
 ): PdfSearchBounds? {
@@ -458,7 +237,7 @@ private fun List<PdfBoxGlyph>.toSearchBounds(
     )
 }
 
-private fun PdfBoxGlyph.hasReliableBounds(
+private fun PdfTextGlyph.hasReliableBounds(
     pageWidth: Float,
     pageHeight: Float
 ): Boolean {
@@ -474,10 +253,10 @@ private fun PdfBoxGlyph.hasReliableBounds(
         bottom <= pageHeight * 1.05f
 }
 
-private val PdfBoxGlyph.centerY: Float
+private val PdfTextGlyph.centerY: Float
     get() = (top + bottom) / 2f
 
-private val PdfBoxGlyph.height: Float
+private val PdfTextGlyph.height: Float
     get() = bottom - top
 
 private const val MAX_MATCH_RECT_WIDTH_RATIO = 0.95f
