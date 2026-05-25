@@ -790,44 +790,64 @@ private fun TextSelectionOverlay(
         val drawsEndHandle = selection.pageRanges.lastOrNull()?.pageIndex == pageIndex
 
         if (firstRect != null && lastRect != null) {
-            val handleRadius = 6.dp.toPx()
+            val handleRadius = TEXT_SELECTION_HANDLE_RADIUS.toPx()
+            val stemWidth = TEXT_SELECTION_HANDLE_STEM_WIDTH.toPx()
             val handleStem = TEXT_SELECTION_HANDLE_STEM.toPx()
             val startHandleY = firstRect.bottom + handleStem
             val endHandleY = lastRect.bottom + handleStem
 
             if (drawsStartHandle) {
-                drawLine(
-                    color = TEXT_SELECTION_HANDLE,
-                    start = androidx.compose.ui.geometry.Offset(firstRect.left, firstRect.center.y),
-                    end = androidx.compose.ui.geometry.Offset(firstRect.left, startHandleY),
-                    strokeWidth = 2.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
-                drawCircle(
-                    color = TEXT_SELECTION_HANDLE,
+                drawSelectionHandle(
+                    x = firstRect.left,
+                    rectTop = firstRect.top,
+                    centerY = startHandleY,
                     radius = handleRadius,
-                    center = androidx.compose.ui.geometry.Offset(firstRect.left, startHandleY),
-                    style = Fill
+                    stemWidth = stemWidth
                 )
             }
 
             if (drawsEndHandle) {
-                drawLine(
-                    color = TEXT_SELECTION_HANDLE,
-                    start = androidx.compose.ui.geometry.Offset(lastRect.right, lastRect.center.y),
-                    end = androidx.compose.ui.geometry.Offset(lastRect.right, endHandleY),
-                    strokeWidth = 2.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
-                drawCircle(
-                    color = TEXT_SELECTION_HANDLE,
+                drawSelectionHandle(
+                    x = lastRect.right,
+                    rectTop = lastRect.top,
+                    centerY = endHandleY,
                     radius = handleRadius,
-                    center = androidx.compose.ui.geometry.Offset(lastRect.right, endHandleY),
-                    style = Fill
+                    stemWidth = stemWidth
                 )
             }
         }
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSelectionHandle(
+    x: Float,
+    rectTop: Float,
+    centerY: Float,
+    radius: Float,
+    stemWidth: Float
+) {
+    val center = androidx.compose.ui.geometry.Offset(x, centerY)
+    val stemBottom = centerY - radius * 0.25f
+
+    drawLine(
+        color = TEXT_SELECTION_HANDLE,
+        start = androidx.compose.ui.geometry.Offset(x, rectTop),
+        end = androidx.compose.ui.geometry.Offset(x, stemBottom),
+        strokeWidth = stemWidth,
+        cap = StrokeCap.Round
+    )
+    drawCircle(
+        color = TEXT_SELECTION_HANDLE,
+        radius = radius,
+        center = center,
+        style = Fill
+    )
+    drawCircle(
+        color = TEXT_SELECTION_HANDLE_INNER,
+        radius = radius * 0.52f,
+        center = center,
+        style = Fill
+    )
 }
 
 @Composable
@@ -1074,10 +1094,13 @@ private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
 private const val PDF_TEXT_SELECTION_EXTRA_LONG_PRESS_MS = 220L
 private const val PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO = 0.45f
 private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.18f
-private val TEXT_SELECTION_HANDLE_STEM = 8.dp
-private val TEXT_SELECTION_HANDLE_HIT_RADIUS = 28.dp
-private val TEXT_SELECTION_FILL = Color(0x4435B9F5)
-private val TEXT_SELECTION_HANDLE = Color(0xCC35B9F5)
+private val TEXT_SELECTION_HANDLE_STEM = 5.dp
+private val TEXT_SELECTION_HANDLE_STEM_WIDTH = 1.6.dp
+private val TEXT_SELECTION_HANDLE_RADIUS = 5.6.dp
+private val TEXT_SELECTION_HANDLE_HIT_RADIUS = 18.dp
+private val TEXT_SELECTION_FILL = Color(0x3835B9F5)
+private val TEXT_SELECTION_HANDLE = Color(0xEE2DB7EC)
+private val TEXT_SELECTION_HANDLE_INNER = Color(0x6635D2FF)
 
 @Composable
 private fun PageMessage(
