@@ -95,6 +95,7 @@ import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.pdf.createPdfFromImages
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.PdfTextSelection
+import com.example.carrotpdf.pdf.PdfTextSelectionHandle
 import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
 import com.example.carrotpdf.pdf.getPdfPageSizes
@@ -135,6 +136,12 @@ fun ReaderStage(
     onRevealChrome: () -> Unit,
     onLinkTap: (PdfLinkRegion) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
+    onTextSelectionHandleDrag: (
+        handle: PdfTextSelectionHandle,
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float
+    ) -> Unit,
     onUserInteraction: () -> Unit,
     onCurrentPageChange: (Int) -> Unit,
     onZoomCommitted: (Float) -> Unit
@@ -177,6 +184,7 @@ fun ReaderStage(
                     pageSizes = pageSizes,
                     onLinkTap = onLinkTap,
                     onTextLongPress = onTextLongPress,
+                    onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                     onUserInteraction = onUserInteraction,
                     pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                         pageIndicatorContent(

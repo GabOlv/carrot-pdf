@@ -100,6 +100,7 @@ import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.pdf.PdfSearchSession
 import com.example.carrotpdf.pdf.PdfTextIndexSession
 import com.example.carrotpdf.pdf.PdfTextSelection
+import com.example.carrotpdf.pdf.PdfTextSelectionHandle
 import com.example.carrotpdf.pdf.createPdfFromImages
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.downloadPdf
@@ -166,6 +167,7 @@ private fun CarrotPdfContent(
     var hasRestoredPersistedTabs by remember { mutableStateOf(false) }
     var selectedExternalLink by remember { mutableStateOf<String?>(null) }
     var selectedTextSelection by remember { mutableStateOf<PdfTextSelection?>(null) }
+    var textSelectionDragGeneration by remember { mutableIntStateOf(0) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val activeViewerState = rememberActiveViewerState(activeTab)
@@ -616,6 +618,35 @@ private fun CarrotPdfContent(
                             isChromeVisible = true
                             isOverflowOpen = false
                             isTabSwitcherOpen = false
+                        }
+                    }
+                },
+                onTextSelectionHandleDrag = { handle, pageIndex, normalizedX, normalizedY ->
+                    val session = activeTextIndexSession ?: return@ReaderStage
+                    val selection = selectedTextSelection
+                        ?.takeIf { currentSelection -> currentSelection.pageIndex == pageIndex }
+                        ?: return@ReaderStage
+                    val tabId = activeTabId
+                    val requestId = ++textSelectionDragGeneration
+
+                    coroutineScope.launch {
+                        val adjustedSelection = withContext(Dispatchers.IO) {
+                            runCatching {
+                                session.adjustSelection(
+                                    selection = selection,
+                                    handle = handle,
+                                    normalizedX = normalizedX,
+                                    normalizedY = normalizedY
+                                )
+                            }.getOrNull()
+                        }
+
+                        if (
+                            activeTabId == tabId &&
+                            requestId == textSelectionDragGeneration &&
+                            adjustedSelection != null
+                        ) {
+                            selectedTextSelection = adjustedSelection
                         }
                     }
                 },

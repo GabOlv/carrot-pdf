@@ -27,6 +27,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -54,6 +55,7 @@ import com.example.carrotpdf.pdf.PdfLinkRegion
 import com.example.carrotpdf.pdf.PdfLinkTarget
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.PdfTextSelection
+import com.example.carrotpdf.pdf.PdfTextSelectionHandle
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.ui.viewer.debug.PdfViewerDebug
@@ -86,6 +88,12 @@ fun ContinuousPdfViewer(
     pageSizes: List<PdfPageSize> = emptyList(),
     onLinkTap: (PdfLinkRegion) -> Unit = {},
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit = { _, _, _ -> },
+    onTextSelectionHandleDrag: (
+        handle: PdfTextSelectionHandle,
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float
+    ) -> Unit = { _, _, _, _ -> },
     onUserInteraction: () -> Unit = {},
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
@@ -414,7 +422,8 @@ fun ContinuousPdfViewer(
                                 selectedTextSelection = selectedTextSelection
                                     ?.takeIf { selection -> selection.pageIndex == pageIndex },
                                 onLinkTap = onLinkTap,
-                                onTextLongPress = onTextLongPress
+                                onTextLongPress = onTextLongPress,
+                                onTextSelectionHandleDrag = onTextSelectionHandleDrag
                             )
                         }
                     }
@@ -453,7 +462,13 @@ private fun PdfPageItem(
     linkRegions: List<PdfLinkRegion>,
     selectedTextSelection: PdfTextSelection?,
     onLinkTap: (PdfLinkRegion) -> Unit,
-    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit
+    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
+    onTextSelectionHandleDrag: (
+        handle: PdfTextSelectionHandle,
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float
+    ) -> Unit
 ) {
     val renderKey = remember(
         documentId,
@@ -554,8 +569,10 @@ private fun PdfPageItem(
                     PdfPageInteractionOverlay(
                         pageIndex = pageIndex,
                         linkRegions = linkRegions,
+                        selectedTextSelection = selectedTextSelection,
                         onLinkTap = onLinkTap,
                         onTextLongPress = onTextLongPress,
+                        onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -649,6 +666,68 @@ private fun expandHighlightRect(
     )
 }
 
+private fun PdfTextSelection.selectionRectsForCanvas(
+    width: Float,
+    height: Float
+): List<Rect> {
+    if (width <= 0f || height <= 0f) {
+        return emptyList()
+    }
+
+    return bounds.mapNotNull { bound ->
+        if (bound.pageWidth > 0f && bound.pageHeight > 0f) {
+            val left = (bound.left / bound.pageWidth) * width
+            val top = (bound.top / bound.pageHeight) * height
+            val right = (bound.right / bound.pageWidth) * width
+            val bottom = (bound.bottom / bound.pageHeight) * height
+
+            expandHighlightRect(
+                left = left,
+                top = top,
+                right = right,
+                bottom = bottom,
+                maxHeight = height
+            )
+        } else {
+            null
+        }
+    }
+}
+
+private fun PdfTextSelection.hitTestSelectionHandle(
+    x: Float,
+    y: Float,
+    width: Float,
+    height: Float,
+    handleStemPx: Float,
+    hitRadiusPx: Float
+): PdfTextSelectionHandle? {
+    val rects = selectionRectsForCanvas(
+        width = width,
+        height = height
+    )
+    val firstRect = rects.firstOrNull() ?: return null
+    val lastRect = rects.lastOrNull() ?: return null
+
+    val startCenter = androidx.compose.ui.geometry.Offset(
+        x = firstRect.left,
+        y = firstRect.bottom + handleStemPx
+    )
+    val endCenter = androidx.compose.ui.geometry.Offset(
+        x = lastRect.right,
+        y = lastRect.bottom + handleStemPx
+    )
+    val touch = androidx.compose.ui.geometry.Offset(x, y)
+    val startDistance = (touch - startCenter).getDistance()
+    val endDistance = (touch - endCenter).getDistance()
+
+    return when {
+        startDistance <= hitRadiusPx && startDistance <= endDistance -> PdfTextSelectionHandle.Start
+        endDistance <= hitRadiusPx -> PdfTextSelectionHandle.End
+        else -> null
+    }
+}
+
 private fun List<PdfLinkRegion>.linkRegionsForPage(pageIndex: Int): List<PdfLinkRegion> {
     return filter { it.pageIndex == pageIndex }
 }
@@ -663,24 +742,10 @@ private fun TextSelectionOverlay(
     }
 
     Canvas(modifier = modifier) {
-        val selectionRects = selection.bounds.mapNotNull { bound ->
-            if (bound.pageWidth > 0f && bound.pageHeight > 0f) {
-                val left = (bound.left / bound.pageWidth) * size.width
-                val top = (bound.top / bound.pageHeight) * size.height
-                val right = (bound.right / bound.pageWidth) * size.width
-                val bottom = (bound.bottom / bound.pageHeight) * size.height
-
-                expandHighlightRect(
-                    left = left,
-                    top = top,
-                    right = right,
-                    bottom = bottom,
-                    maxHeight = size.height
-                )
-            } else {
-                null
-            }
-        }
+        val selectionRects = selection.selectionRectsForCanvas(
+            width = size.width,
+            height = size.height
+        )
 
         selectionRects.forEach { rect ->
             drawRect(
@@ -699,34 +764,35 @@ private fun TextSelectionOverlay(
 
         if (firstRect != null && lastRect != null) {
             val handleRadius = 6.dp.toPx()
-            val handleStem = 8.dp.toPx()
-            val handleY = firstRect.bottom + handleStem
+            val handleStem = TEXT_SELECTION_HANDLE_STEM.toPx()
+            val startHandleY = firstRect.bottom + handleStem
+            val endHandleY = lastRect.bottom + handleStem
 
             drawLine(
                 color = TEXT_SELECTION_HANDLE,
                 start = androidx.compose.ui.geometry.Offset(firstRect.left, firstRect.center.y),
-                end = androidx.compose.ui.geometry.Offset(firstRect.left, handleY),
+                end = androidx.compose.ui.geometry.Offset(firstRect.left, startHandleY),
                 strokeWidth = 2.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawCircle(
                 color = TEXT_SELECTION_HANDLE,
                 radius = handleRadius,
-                center = androidx.compose.ui.geometry.Offset(firstRect.left, handleY),
+                center = androidx.compose.ui.geometry.Offset(firstRect.left, startHandleY),
                 style = Fill
             )
 
             drawLine(
                 color = TEXT_SELECTION_HANDLE,
                 start = androidx.compose.ui.geometry.Offset(lastRect.right, lastRect.center.y),
-                end = androidx.compose.ui.geometry.Offset(lastRect.right, handleY),
+                end = androidx.compose.ui.geometry.Offset(lastRect.right, endHandleY),
                 strokeWidth = 2.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawCircle(
                 color = TEXT_SELECTION_HANDLE,
                 radius = handleRadius,
-                center = androidx.compose.ui.geometry.Offset(lastRect.right, handleY),
+                center = androidx.compose.ui.geometry.Offset(lastRect.right, endHandleY),
                 style = Fill
             )
         }
@@ -737,12 +803,24 @@ private fun TextSelectionOverlay(
 private fun PdfPageInteractionOverlay(
     pageIndex: Int,
     linkRegions: List<PdfLinkRegion>,
+    selectedTextSelection: PdfTextSelection?,
     onLinkTap: (PdfLinkRegion) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
+    onTextSelectionHandleDrag: (
+        handle: PdfTextSelectionHandle,
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float
+    ) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val viewConfiguration = LocalViewConfiguration.current
     val hapticFeedback = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val handleHitRadiusPx = with(density) { TEXT_SELECTION_HANDLE_HIT_RADIUS.toPx() }
+    val handleStemPx = with(density) { TEXT_SELECTION_HANDLE_STEM.toPx() }
+    val currentSelection = rememberUpdatedState(selectedTextSelection)
+    val currentHandleDrag = rememberUpdatedState(onTextSelectionHandleDrag)
     var selectedLink by remember(linkRegions) {
         mutableStateOf<PdfLinkRegion?>(null)
     }
@@ -754,6 +832,45 @@ private fun PdfPageInteractionOverlay(
         modifier = modifier.pointerInput(pageIndex, linkRegions) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
+                val downHandle = currentSelection.value?.hitTestSelectionHandle(
+                    x = down.position.x,
+                    y = down.position.y,
+                    width = size.width.toFloat(),
+                    height = size.height.toFloat(),
+                    handleStemPx = handleStemPx,
+                    hitRadiusPx = handleHitRadiusPx
+                )
+
+                if (downHandle != null) {
+                    selectedLink = null
+                    selectedAtMillis = 0L
+                    down.consume()
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+
+                    var isHandlePressed: Boolean
+                    do {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { pointerChange -> pointerChange.id == down.id }
+
+                        if (change != null) {
+                            if (size.width > 0 && size.height > 0) {
+                                currentHandleDrag.value(
+                                    downHandle,
+                                    pageIndex,
+                                    (change.position.x / size.width.toFloat()).coerceIn(0f, 1f),
+                                    (change.position.y / size.height.toFloat()).coerceIn(0f, 1f)
+                                )
+                            }
+
+                            change.consume()
+                        }
+
+                        isHandlePressed = event.changes.any { change -> change.pressed }
+                    } while (isHandlePressed)
+
+                    return@awaitEachGesture
+                }
+
                 val downLink = linkRegions.hitTestLink(
                     x = down.position.x,
                     y = down.position.y,
@@ -915,6 +1032,8 @@ private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
 private const val LINK_TAP_MAX_DURATION_MS = 700L
 private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
 private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.18f
+private val TEXT_SELECTION_HANDLE_STEM = 8.dp
+private val TEXT_SELECTION_HANDLE_HIT_RADIUS = 28.dp
 private val TEXT_SELECTION_FILL = Color(0x4435B9F5)
 private val TEXT_SELECTION_HANDLE = Color(0xCC35B9F5)
 

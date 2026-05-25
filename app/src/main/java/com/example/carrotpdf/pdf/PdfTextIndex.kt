@@ -29,8 +29,15 @@ internal data class PdfTextGlyph(
 data class PdfTextSelection(
     val pageIndex: Int,
     val text: String,
+    val startIndex: Int,
+    val endExclusive: Int,
     val bounds: List<PdfTextBounds>
 )
+
+enum class PdfTextSelectionHandle {
+    Start,
+    End
+}
 
 data class PdfTextBounds(
     val left: Float,
@@ -63,6 +70,26 @@ internal class PdfTextIndexSession(
                 normalizedX = normalizedX,
                 normalizedY = normalizedY
             )
+    }
+
+    suspend fun adjustSelection(
+        selection: PdfTextSelection,
+        handle: PdfTextSelectionHandle,
+        normalizedX: Float,
+        normalizedY: Float
+    ): PdfTextSelection? {
+        val page = pages().getOrNull(selection.pageIndex) ?: return null
+
+        if (page.pageIndex != selection.pageIndex) {
+            return null
+        }
+
+        return page.adjustSelection(
+            selection = selection,
+            handle = handle,
+            normalizedX = normalizedX,
+            normalizedY = normalizedY
+        )
     }
 
     suspend fun pages(): List<PdfTextIndexedPage> {
@@ -111,15 +138,68 @@ private fun PdfTextIndexedPage.wordAt(
         } ?: return null
 
     val wordRange = text.wordRangeAround(glyph.sourceIndex) ?: return null
-    val selectedText = text.substring(wordRange.first, wordRange.last + 1).trim()
+    return selectionForRange(
+        start = wordRange.first,
+        endExclusive = wordRange.last + 1
+    )
+}
+
+private fun PdfTextIndexedPage.adjustSelection(
+    selection: PdfTextSelection,
+    handle: PdfTextSelectionHandle,
+    normalizedX: Float,
+    normalizedY: Float
+): PdfTextSelection? {
+    if (selection.pageIndex != pageIndex) {
+        return null
+    }
+
+    val sourceIndex = sourceIndexClosestTo(
+        normalizedX = normalizedX,
+        normalizedY = normalizedY
+    ) ?: return selection
+
+    val start = when (handle) {
+        PdfTextSelectionHandle.Start -> sourceIndex.coerceAtMost(selection.endExclusive - 1)
+        PdfTextSelectionHandle.End -> selection.startIndex
+    }.coerceIn(0, text.length)
+
+    val endExclusive = when (handle) {
+        PdfTextSelectionHandle.Start -> selection.endExclusive
+        PdfTextSelectionHandle.End -> (sourceIndex + 1).coerceAtLeast(selection.startIndex + 1)
+    }.coerceIn(0, text.length)
+
+    return selectionForRange(
+        start = start.coerceAtMost((endExclusive - 1).coerceAtLeast(0)),
+        endExclusive = endExclusive.coerceAtLeast(start + 1)
+    ) ?: selection
+}
+
+private fun PdfTextIndexedPage.selectionForRange(
+    start: Int,
+    endExclusive: Int
+): PdfTextSelection? {
+    if (
+        text.isBlank() ||
+        glyphs.isEmpty() ||
+        pageWidth <= 0f ||
+        pageHeight <= 0f ||
+        start !in 0..text.length ||
+        endExclusive !in 0..text.length ||
+        endExclusive <= start
+    ) {
+        return null
+    }
+
+    val selectedText = text.substring(start, endExclusive).trim()
 
     if (selectedText.isBlank()) {
         return null
     }
 
     val bounds = boundsForRange(
-        start = wordRange.first,
-        endExclusive = wordRange.last + 1
+        start = start,
+        endExclusive = endExclusive
     )
 
     if (bounds.isEmpty()) {
@@ -129,8 +209,32 @@ private fun PdfTextIndexedPage.wordAt(
     return PdfTextSelection(
         pageIndex = pageIndex,
         text = selectedText,
+        startIndex = start,
+        endExclusive = endExclusive,
         bounds = bounds
     )
+}
+
+private fun PdfTextIndexedPage.sourceIndexClosestTo(
+    normalizedX: Float,
+    normalizedY: Float
+): Int? {
+    if (
+        text.isBlank() ||
+        glyphs.isEmpty() ||
+        pageWidth <= 0f ||
+        pageHeight <= 0f
+    ) {
+        return null
+    }
+
+    val pageX = normalizedX.coerceIn(0f, 1f) * pageWidth
+    val pageY = normalizedY.coerceIn(0f, 1f) * pageHeight
+
+    return glyphs
+        .filter { glyph -> glyph.hasReliableBounds(pageWidth, pageHeight) }
+        .minByOrNull { glyph -> glyph.hitDistanceSquared(pageX, pageY) }
+        ?.sourceIndex
 }
 
 private fun PdfTextIndexedPage.boundsForRange(
