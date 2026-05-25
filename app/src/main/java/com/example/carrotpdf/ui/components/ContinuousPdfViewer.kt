@@ -314,7 +314,7 @@ fun ContinuousPdfViewer(
             documentId = viewerState.documentId,
             visiblePages = geometryVisiblePages,
             renderQualityScale = viewerState.renderQualityScale,
-            isEnabled = viewerState.canRunRenderScheduler,
+            isEnabled = viewerState.canRunRenderScheduler && !isManualScrollInProgress,
             onRenderQualityDisplayed = viewerState::markRenderQualityDisplayed
         )
 
