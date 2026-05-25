@@ -636,6 +636,7 @@ private fun CarrotPdfContent(
                                 session.adjustSelection(
                                     selection = selection,
                                     handle = handle,
+                                    pageIndex = pageIndex,
                                     normalizedX = normalizedX,
                                     normalizedY = normalizedY
                                 )

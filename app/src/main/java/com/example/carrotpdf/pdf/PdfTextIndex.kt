@@ -9,6 +9,7 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.floor
 
 internal data class PdfTextIndexedPage(
     val pageIndex: Int,
@@ -31,7 +32,14 @@ data class PdfTextSelection(
     val text: String,
     val startIndex: Int,
     val endExclusive: Int,
+    val pageRanges: List<PdfTextSelectionRange>,
     val bounds: List<PdfTextBounds>
+)
+
+data class PdfTextSelectionRange(
+    val pageIndex: Int,
+    val startIndex: Int,
+    val endExclusive: Int
 )
 
 enum class PdfTextSelectionHandle {
@@ -40,6 +48,7 @@ enum class PdfTextSelectionHandle {
 }
 
 data class PdfTextBounds(
+    val pageIndex: Int,
     val left: Float,
     val top: Float,
     val right: Float,
@@ -75,18 +84,14 @@ internal class PdfTextIndexSession(
     suspend fun adjustSelection(
         selection: PdfTextSelection,
         handle: PdfTextSelectionHandle,
+        pageIndex: Int,
         normalizedX: Float,
         normalizedY: Float
     ): PdfTextSelection? {
-        val page = pages().getOrNull(selection.pageIndex) ?: return null
-
-        if (page.pageIndex != selection.pageIndex) {
-            return null
-        }
-
-        return page.adjustSelection(
+        return pages().adjustSelection(
             selection = selection,
             handle = handle,
+            pageIndex = pageIndex,
             normalizedX = normalizedX,
             normalizedY = normalizedY
         )
@@ -144,34 +149,48 @@ private fun PdfTextIndexedPage.wordAt(
     )
 }
 
-private fun PdfTextIndexedPage.adjustSelection(
+private fun List<PdfTextIndexedPage>.adjustSelection(
     selection: PdfTextSelection,
     handle: PdfTextSelectionHandle,
+    pageIndex: Int,
     normalizedX: Float,
     normalizedY: Float
 ): PdfTextSelection? {
-    if (selection.pageIndex != pageIndex) {
-        return null
-    }
-
-    val sourceIndex = sourceIndexClosestTo(
+    val targetPoint = resolvePagePoint(
+        pageIndex = pageIndex,
         normalizedX = normalizedX,
         normalizedY = normalizedY
     ) ?: return selection
+    val targetPage = getOrNull(targetPoint.pageIndex) ?: return selection
 
-    val start = when (handle) {
-        PdfTextSelectionHandle.Start -> sourceIndex.coerceAtMost(selection.endExclusive - 1)
-        PdfTextSelectionHandle.End -> selection.startIndex
-    }.coerceIn(0, text.length)
+    val sourceIndex = targetPage.sourceIndexClosestTo(
+        normalizedX = targetPoint.normalizedX,
+        normalizedY = targetPoint.normalizedY
+    ) ?: return selection
 
-    val endExclusive = when (handle) {
-        PdfTextSelectionHandle.Start -> selection.endExclusive
-        PdfTextSelectionHandle.End -> (sourceIndex + 1).coerceAtLeast(selection.startIndex + 1)
-    }.coerceIn(0, text.length)
+    val currentStart = selection.startEndpoint() ?: return selection
+    val currentEnd = selection.endEndpoint() ?: return selection
+    val targetEndpoint = PdfTextEndpoint(
+        pageIndex = targetPage.pageIndex,
+        index = sourceIndex
+    )
 
-    return selectionForRange(
-        start = start.coerceAtMost((endExclusive - 1).coerceAtLeast(0)),
-        endExclusive = endExclusive.coerceAtLeast(start + 1)
+    val rawStart = when (handle) {
+        PdfTextSelectionHandle.Start -> targetEndpoint
+        PdfTextSelectionHandle.End -> currentStart
+    }
+    val rawEnd = when (handle) {
+        PdfTextSelectionHandle.Start -> currentEnd
+        PdfTextSelectionHandle.End -> targetEndpoint.copy(index = sourceIndex + 1)
+    }
+    val (start, endExclusive) = normalizeSelectionEndpoints(
+        start = rawStart,
+        endExclusive = rawEnd
+    )
+
+    return selectionForEndpoints(
+        start = start,
+        endExclusive = endExclusive
     ) ?: selection
 }
 
@@ -206,12 +225,226 @@ private fun PdfTextIndexedPage.selectionForRange(
         return null
     }
 
+    val range = PdfTextSelectionRange(
+        pageIndex = pageIndex,
+        startIndex = start,
+        endExclusive = endExclusive
+    )
+
     return PdfTextSelection(
         pageIndex = pageIndex,
         text = selectedText,
         startIndex = start,
         endExclusive = endExclusive,
+        pageRanges = listOf(range),
         bounds = bounds
+    )
+}
+
+private fun List<PdfTextIndexedPage>.selectionForEndpoints(
+    start: PdfTextEndpoint,
+    endExclusive: PdfTextEndpoint
+): PdfTextSelection? {
+    if (isEmpty()) {
+        return null
+    }
+
+    val normalizedStart = start.coerceToPages(this)
+    val normalizedEnd = endExclusive.coerceToPages(this)
+    val ranges = buildSelectionRanges(
+        pages = this,
+        start = normalizedStart,
+        endExclusive = normalizedEnd
+    )
+
+    if (ranges.isEmpty()) {
+        return null
+    }
+
+    val textParts = ranges.mapNotNull { range ->
+        val page = getOrNull(range.pageIndex) ?: return@mapNotNull null
+
+        if (
+            range.startIndex !in 0..page.text.length ||
+            range.endExclusive !in 0..page.text.length ||
+            range.endExclusive <= range.startIndex
+        ) {
+            null
+        } else {
+            page.text.substring(range.startIndex, range.endExclusive)
+        }
+    }
+    val selectedText = textParts.joinToString(separator = "\n").trim()
+
+    if (selectedText.isBlank()) {
+        return null
+    }
+
+    val bounds = ranges.flatMap { range ->
+        getOrNull(range.pageIndex)
+            ?.boundsForRange(
+                start = range.startIndex,
+                endExclusive = range.endExclusive
+            )
+            .orEmpty()
+    }
+
+    if (bounds.isEmpty()) {
+        return null
+    }
+
+    val firstRange = ranges.first()
+    val lastRange = ranges.last()
+
+    return PdfTextSelection(
+        pageIndex = firstRange.pageIndex,
+        text = selectedText,
+        startIndex = firstRange.startIndex,
+        endExclusive = lastRange.endExclusive,
+        pageRanges = ranges,
+        bounds = bounds
+    )
+}
+
+private data class PdfTextEndpoint(
+    val pageIndex: Int,
+    val index: Int
+)
+
+private data class PdfTextPagePoint(
+    val pageIndex: Int,
+    val normalizedX: Float,
+    val normalizedY: Float
+)
+
+private fun PdfTextSelection.startEndpoint(): PdfTextEndpoint? {
+    val firstRange = pageRanges.firstOrNull() ?: return null
+
+    return PdfTextEndpoint(
+        pageIndex = firstRange.pageIndex,
+        index = firstRange.startIndex
+    )
+}
+
+private fun PdfTextSelection.endEndpoint(): PdfTextEndpoint? {
+    val lastRange = pageRanges.lastOrNull() ?: return null
+
+    return PdfTextEndpoint(
+        pageIndex = lastRange.pageIndex,
+        index = lastRange.endExclusive
+    )
+}
+
+private fun normalizeSelectionEndpoints(
+    start: PdfTextEndpoint,
+    endExclusive: PdfTextEndpoint
+): Pair<PdfTextEndpoint, PdfTextEndpoint> {
+    return if (start <= endExclusive) {
+        start to endExclusive
+    } else {
+        endExclusive to start
+    }
+}
+
+private operator fun PdfTextEndpoint.compareTo(
+    other: PdfTextEndpoint
+): Int {
+    return when {
+        pageIndex != other.pageIndex -> pageIndex.compareTo(other.pageIndex)
+        else -> index.compareTo(other.index)
+    }
+}
+
+private fun PdfTextEndpoint.coerceToPages(
+    pages: List<PdfTextIndexedPage>
+): PdfTextEndpoint {
+    val page = pages
+        .getOrNull(pageIndex.coerceIn(0, pages.lastIndex))
+        ?: return this
+
+    return PdfTextEndpoint(
+        pageIndex = page.pageIndex,
+        index = index.coerceIn(0, page.text.length)
+    )
+}
+
+private fun buildSelectionRanges(
+    pages: List<PdfTextIndexedPage>,
+    start: PdfTextEndpoint,
+    endExclusive: PdfTextEndpoint
+): List<PdfTextSelectionRange> {
+    if (start.pageIndex == endExclusive.pageIndex) {
+        val page = pages.getOrNull(start.pageIndex) ?: return emptyList()
+        val startIndex = start.index.coerceIn(0, page.text.length)
+        val endIndex = endExclusive.index.coerceIn(0, page.text.length)
+
+        return if (endIndex > startIndex) {
+            listOf(
+                PdfTextSelectionRange(
+                    pageIndex = page.pageIndex,
+                    startIndex = startIndex,
+                    endExclusive = endIndex
+                )
+            )
+        } else {
+            emptyList()
+        }
+    }
+
+    return buildList {
+        for (pageIndex in start.pageIndex..endExclusive.pageIndex) {
+            val page = pages.getOrNull(pageIndex) ?: continue
+            val rangeStart = if (pageIndex == start.pageIndex) {
+                start.index.coerceIn(0, page.text.length)
+            } else {
+                0
+            }
+            val rangeEnd = if (pageIndex == endExclusive.pageIndex) {
+                endExclusive.index.coerceIn(0, page.text.length)
+            } else {
+                page.text.length
+            }
+
+            if (rangeEnd > rangeStart) {
+                add(
+                    PdfTextSelectionRange(
+                        pageIndex = page.pageIndex,
+                        startIndex = rangeStart,
+                        endExclusive = rangeEnd
+                    )
+                )
+            }
+        }
+    }
+}
+
+private fun List<PdfTextIndexedPage>.resolvePagePoint(
+    pageIndex: Int,
+    normalizedX: Float,
+    normalizedY: Float
+): PdfTextPagePoint? {
+    if (isEmpty() || pageIndex !in indices) {
+        return null
+    }
+
+    val pageOffset = when {
+        normalizedY < 0f -> floor(normalizedY).toInt()
+        normalizedY > 1f -> floor(normalizedY).toInt()
+        else -> 0
+    }
+    val rawPageIndex = pageIndex + pageOffset
+    val targetPageIndex = rawPageIndex.coerceIn(0, lastIndex)
+    val localY = when {
+        rawPageIndex < 0 -> 0f
+        rawPageIndex > lastIndex -> 1f
+        pageOffset != 0 -> normalizedY - pageOffset
+        else -> normalizedY
+    }
+
+    return PdfTextPagePoint(
+        pageIndex = targetPageIndex,
+        normalizedX = normalizedX.coerceIn(0f, 1f),
+        normalizedY = localY.coerceIn(0f, 1f)
     )
 }
 
@@ -254,6 +487,7 @@ private fun PdfTextIndexedPage.boundsForRange(
         .groupIntoVisualLines()
         .mapNotNull { lineGlyphs ->
             lineGlyphs.toTextBounds(
+                pageIndex = pageIndex,
                 pageWidth = pageWidth,
                 pageHeight = pageHeight
             )
@@ -306,6 +540,7 @@ private fun List<PdfTextGlyph>.groupIntoVisualLines(): List<List<PdfTextGlyph>> 
 }
 
 private fun List<PdfTextGlyph>.toTextBounds(
+    pageIndex: Int,
     pageWidth: Float,
     pageHeight: Float
 ): PdfTextBounds? {
@@ -331,6 +566,7 @@ private fun List<PdfTextGlyph>.toTextBounds(
     }
 
     return PdfTextBounds(
+        pageIndex = pageIndex,
         left = left,
         top = top,
         right = right,
