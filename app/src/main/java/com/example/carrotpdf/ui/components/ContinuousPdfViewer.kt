@@ -903,6 +903,10 @@ private fun PdfPageInteractionOverlay(
                     return@awaitEachGesture
                 }
 
+                if (currentSelection.value != null) {
+                    return@awaitEachGesture
+                }
+
                 val downLink = linkRegions.hitTestLink(
                     x = down.position.x,
                     y = down.position.y,
@@ -919,8 +923,12 @@ private fun PdfPageInteractionOverlay(
                 var wasTapLike = true
                 var isPressed = true
                 var upLink: PdfLinkRegion? = null
+                val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis +
+                    PDF_TEXT_SELECTION_EXTRA_LONG_PRESS_MS
+                val textSelectionCancelSlop = viewConfiguration.touchSlop *
+                    PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO
 
-                val timedOutForLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                val timedOutForLongPress = withTimeoutOrNull(longPressTimeoutMillis) {
                     while (true) {
                         val event = awaitPointerEvent()
                         val pressedChanges = event.changes.filter { change -> change.pressed }
@@ -935,7 +943,7 @@ private fun PdfPageInteractionOverlay(
 
                         lastPosition = change.position
 
-                        if ((change.position - downPosition).getDistance() > viewConfiguration.touchSlop) {
+                        if ((change.position - downPosition).getDistance() > textSelectionCancelSlop) {
                             hasMoved = true
                             return@withTimeoutOrNull false
                         }
@@ -1063,6 +1071,8 @@ private const val SEARCH_TARGET_VERTICAL_ANCHOR = 0.35f
 private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
 private const val LINK_TAP_MAX_DURATION_MS = 700L
 private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
+private const val PDF_TEXT_SELECTION_EXTRA_LONG_PRESS_MS = 220L
+private const val PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO = 0.45f
 private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.18f
 private val TEXT_SELECTION_HANDLE_STEM = 8.dp
 private val TEXT_SELECTION_HANDLE_HIT_RADIUS = 28.dp

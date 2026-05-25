@@ -625,7 +625,9 @@ private fun CarrotPdfContent(
                 onTextSelectionHandleDrag = { handle, pageIndex, normalizedX, normalizedY ->
                     val session = activeTextIndexSession ?: return@ReaderStage
                     val selection = selectedTextSelection
-                        ?.takeIf { currentSelection -> currentSelection.pageIndex == pageIndex }
+                        ?.takeIf { currentSelection ->
+                            currentSelection.pageRanges.any { range -> range.pageIndex == pageIndex }
+                        }
                         ?: return@ReaderStage
                     val tabId = activeTabId
                     val requestId = ++textSelectionDragGeneration
