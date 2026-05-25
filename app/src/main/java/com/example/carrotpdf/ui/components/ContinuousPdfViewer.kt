@@ -356,12 +356,37 @@ fun ContinuousPdfViewer(
             }
         }
 
-        LaunchedEffect(renderRefinementRequests) {
+        LaunchedEffect(
+            renderRefinementRequests,
+            viewerState.interactionMode,
+            isManualScrollInProgress
+        ) {
             if (renderRefinementRequests == 0) {
                 return@LaunchedEffect
             }
 
+            if (
+                isManualScrollInProgress ||
+                (
+                    viewerState.interactionMode != PdfInteractionMode.Idle &&
+                        viewerState.interactionMode != PdfInteractionMode.Settling
+                    )
+            ) {
+                return@LaunchedEffect
+            }
+
             delay(RENDER_REFINEMENT_DEBOUNCE_MS)
+
+            if (
+                isManualScrollInProgress ||
+                (
+                    viewerState.interactionMode != PdfInteractionMode.Idle &&
+                        viewerState.interactionMode != PdfInteractionMode.Settling
+                    )
+            ) {
+                return@LaunchedEffect
+            }
+
             viewerState.refineRenderQualityIfNeeded()
             viewerState.finishSettling()
         }
