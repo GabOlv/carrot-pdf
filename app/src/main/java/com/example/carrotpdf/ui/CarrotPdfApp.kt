@@ -196,7 +196,9 @@ private fun CarrotPdfContent(
         }
     }
 
-    ImmersiveSystemBars(isChromeVisible)
+    ImmersiveSystemBars(
+        isChromeVisible = isChromeVisible || selectedTextSelection != null
+    )
 
     fun closeSearch() {
         isSearchVisible = false
@@ -209,7 +211,6 @@ private fun CarrotPdfContent(
     }
 
     fun hideChromeForReading() {
-        selectedTextSelection = null
         selectedExternalLink = null
 
         if (!isSearchVisible) {
@@ -777,7 +778,9 @@ private fun CarrotPdfContent(
             }
 
             AnimatedVisibility(
-                visible = (isChromeVisible || isSearchVisible) && activeTab != null,
+                visible = (isChromeVisible || isSearchVisible) &&
+                    activeTab != null &&
+                    selectedTextSelection == null,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
