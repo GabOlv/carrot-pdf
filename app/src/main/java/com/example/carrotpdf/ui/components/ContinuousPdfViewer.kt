@@ -7,7 +7,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
@@ -69,6 +68,7 @@ import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.viewport.PdfViewport
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
 @Composable
@@ -549,15 +549,11 @@ private fun PdfPageItem(
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    PdfTextLongPressOverlay(
+                    PdfPageInteractionOverlay(
                         pageIndex = pageIndex,
-                        onTextLongPress = onTextLongPress,
-                        modifier = Modifier.fillMaxSize()
-                    )
-
-                    PdfLinkInteractionOverlay(
                         linkRegions = linkRegions,
                         onLinkTap = onLinkTap,
+                        onTextLongPress = onTextLongPress,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -659,43 +655,13 @@ private fun TextSelectionOverlay(
 }
 
 @Composable
-private fun PdfTextLongPressOverlay(
+private fun PdfPageInteractionOverlay(
     pageIndex: Int,
+    linkRegions: List<PdfLinkRegion>,
+    onLinkTap: (PdfLinkRegion) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier.pointerInput(pageIndex) {
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                val longPress = awaitLongPressOrCancellation(down.id)
-                    ?: return@awaitEachGesture
-
-                if (size.width <= 0 || size.height <= 0) {
-                    return@awaitEachGesture
-                }
-
-                onTextLongPress(
-                    pageIndex,
-                    (longPress.position.x / size.width.toFloat()).coerceIn(0f, 1f),
-                    (longPress.position.y / size.height.toFloat()).coerceIn(0f, 1f)
-                )
-                longPress.consume()
-            }
-        }
-    )
-}
-
-@Composable
-private fun PdfLinkInteractionOverlay(
-    linkRegions: List<PdfLinkRegion>,
-    onLinkTap: (PdfLinkRegion) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    if (linkRegions.isEmpty()) {
-        return
-    }
-
     val viewConfiguration = LocalViewConfiguration.current
     val hapticFeedback = LocalHapticFeedback.current
     var selectedLink by remember(linkRegions) {
@@ -706,7 +672,7 @@ private fun PdfLinkInteractionOverlay(
     }
 
     Box(
-        modifier = modifier.pointerInput(linkRegions) {
+        modifier = modifier.pointerInput(pageIndex, linkRegions) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val downLink = linkRegions.hitTestLink(
@@ -714,30 +680,42 @@ private fun PdfLinkInteractionOverlay(
                     y = down.position.y,
                     width = size.width.toFloat(),
                     height = size.height.toFloat()
-                ) ?: return@awaitEachGesture
+                )
 
                 val downPosition = down.position
                 val downTime = down.uptimeMillis
+                var lastPosition = down.position
+                var upTime = downTime
                 var hasMoved = false
                 var hasMultiplePointers = false
                 var wasTapLike = true
+                var isPressed = true
                 var upLink: PdfLinkRegion? = null
 
-                do {
-                    val event = awaitPointerEvent()
-                    val pressedChanges = event.changes.filter { change -> change.pressed }
+                val timedOutForLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressedChanges = event.changes.filter { change -> change.pressed }
 
-                    if (pressedChanges.size > 1) {
-                        hasMultiplePointers = true
-                    }
+                        if (pressedChanges.size > 1) {
+                            hasMultiplePointers = true
+                            return@withTimeoutOrNull false
+                        }
 
-                    event.changes.firstOrNull { change -> change.id == down.id }?.let { change ->
+                        val change = event.changes.firstOrNull { pointerChange -> pointerChange.id == down.id }
+                            ?: return@withTimeoutOrNull false
+
+                        lastPosition = change.position
+
                         if ((change.position - downPosition).getDistance() > viewConfiguration.touchSlop) {
                             hasMoved = true
+                            return@withTimeoutOrNull false
                         }
 
                         if (change.changedToUpIgnoreConsumed()) {
-                            wasTapLike = change.uptimeMillis - downTime <= LINK_TAP_MAX_DURATION_MS
+                            isPressed = false
+                            upTime = change.uptimeMillis
+                            wasTapLike = upTime - downTime <= LINK_TAP_MAX_DURATION_MS
                             upLink = linkRegions.hitTestLink(
                                 x = change.position.x,
                                 y = change.position.y,
@@ -746,25 +724,50 @@ private fun PdfLinkInteractionOverlay(
                             )
 
                             if (
-                                !hasMoved &&
-                                !hasMultiplePointers &&
-                                wasTapLike &&
-                                upLink != null
+                                downLink != null &&
+                                upLink != null &&
+                                upLink?.target == downLink.target &&
+                                wasTapLike
                             ) {
                                 down.consume()
                                 change.consume()
                             }
+
+                            return@withTimeoutOrNull false
                         }
                     }
-                } while (event.changes.any { change -> change.pressed })
+                } == null
+
+                if (timedOutForLongPress && isPressed && !hasMoved && !hasMultiplePointers) {
+                    selectedLink = null
+                    selectedAtMillis = 0L
+
+                    if (size.width > 0 && size.height > 0) {
+                        onTextLongPress(
+                            pageIndex,
+                            (lastPosition.x / size.width.toFloat()).coerceIn(0f, 1f),
+                            (lastPosition.y / size.height.toFloat()).coerceIn(0f, 1f)
+                        )
+                    }
+
+                    drainPressedPointers(consume = true)
+                    return@awaitEachGesture
+                }
+
+                if (hasMoved || hasMultiplePointers) {
+                    selectedLink = null
+                    selectedAtMillis = 0L
+                    drainPressedPointers(consume = false)
+                    return@awaitEachGesture
+                }
 
                 if (!hasMoved && !hasMultiplePointers && wasTapLike) {
                     val tappedLink = upLink
 
-                    if (tappedLink != null && tappedLink.target == downLink.target) {
+                    if (downLink != null && tappedLink != null && tappedLink.target == downLink.target) {
                         val selected = selectedLink
                         val isSameSelection = selected != null && selected.target == tappedLink.target
-                        val isWithinDoubleTapWindow = downTime - selectedAtMillis <= LINK_DOUBLE_TAP_WINDOW_MS
+                        val isWithinDoubleTapWindow = upTime - selectedAtMillis <= LINK_DOUBLE_TAP_WINDOW_MS
 
                         if (isSameSelection && isWithinDoubleTapWindow) {
                             selectedLink = null
@@ -783,6 +786,20 @@ private fun PdfLinkInteractionOverlay(
             }
         }
     )
+}
+
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.drainPressedPointers(
+    consume: Boolean
+) {
+    do {
+        val event = awaitPointerEvent()
+
+        if (consume) {
+            event.changes.forEach { change ->
+                change.consume()
+            }
+        }
+    } while (event.changes.any { change -> change.pressed })
 }
 
 private fun List<PdfLinkRegion>.hitTestLink(

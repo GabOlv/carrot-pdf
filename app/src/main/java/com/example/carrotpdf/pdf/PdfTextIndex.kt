@@ -213,12 +213,14 @@ private fun List<PdfTextGlyph>.toTextBounds(
     val rawTop = minOf { it.top }
     val rawRight = maxOf { it.right }
     val rawBottom = maxOf { it.bottom }
-    val verticalPadding = (rawBottom - rawTop) * TEXT_SELECTION_VERTICAL_PADDING_RATIO
+    val rawHeight = rawBottom - rawTop
+    val verticalShift = rawHeight * TEXT_SELECTION_UPSHIFT_RATIO
+    val verticalInset = rawHeight * TEXT_SELECTION_VERTICAL_INSET_RATIO
 
     val left = rawLeft.coerceIn(0f, pageWidth)
-    val top = (rawTop - verticalPadding).coerceIn(0f, pageHeight)
+    val top = (rawTop - verticalShift + verticalInset).coerceIn(0f, pageHeight)
     val right = rawRight.coerceIn(0f, pageWidth)
-    val bottom = (rawBottom + verticalPadding).coerceIn(0f, pageHeight)
+    val bottom = (rawBottom - verticalShift - verticalInset).coerceIn(0f, pageHeight)
 
     if (right <= left || bottom <= top) {
         return null
@@ -468,4 +470,5 @@ private fun TextPosition.toGlyph(
 private const val TEXT_HIT_MIN_TOLERANCE_PT = 3f
 private const val TEXT_HIT_WIDTH_TOLERANCE_RATIO = 0.65f
 private const val TEXT_HIT_HEIGHT_TOLERANCE_RATIO = 0.85f
-private const val TEXT_SELECTION_VERTICAL_PADDING_RATIO = 0.12f
+private const val TEXT_SELECTION_UPSHIFT_RATIO = 0.92f
+private const val TEXT_SELECTION_VERTICAL_INSET_RATIO = 0.04f
