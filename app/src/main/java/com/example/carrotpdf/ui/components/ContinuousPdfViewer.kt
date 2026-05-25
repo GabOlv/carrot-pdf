@@ -31,8 +31,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.graphicsLayer
@@ -633,23 +635,73 @@ private fun TextSelectionOverlay(
     }
 
     Canvas(modifier = modifier) {
-        selection.bounds.forEach { bound ->
+        val selectionRects = selection.bounds.mapNotNull { bound ->
             if (bound.pageWidth > 0f && bound.pageHeight > 0f) {
                 val left = (bound.left / bound.pageWidth) * size.width
                 val top = (bound.top / bound.pageHeight) * size.height
                 val right = (bound.right / bound.pageWidth) * size.width
                 val bottom = (bound.bottom / bound.pageHeight) * size.height
+                val width = (right - left).coerceAtLeast(2f)
+                val height = (bottom - top).coerceAtLeast(2f)
 
-                drawRect(
-                    color = Color(0x66FF8A1F),
-                    topLeft = androidx.compose.ui.geometry.Offset(left, top),
-                    size = androidx.compose.ui.geometry.Size(
-                        width = (right - left).coerceAtLeast(2f),
-                        height = (bottom - top).coerceAtLeast(2f)
-                    ),
-                    style = Fill
+                Rect(
+                    left = left,
+                    top = top,
+                    right = left + width,
+                    bottom = top + height
                 )
+            } else {
+                null
             }
+        }
+
+        selectionRects.forEach { rect ->
+            drawRect(
+                color = TEXT_SELECTION_FILL,
+                topLeft = androidx.compose.ui.geometry.Offset(rect.left, rect.top),
+                size = androidx.compose.ui.geometry.Size(
+                    width = rect.width,
+                    height = rect.height
+                ),
+                style = Fill
+            )
+        }
+
+        val firstRect = selectionRects.firstOrNull()
+        val lastRect = selectionRects.lastOrNull()
+
+        if (firstRect != null && lastRect != null) {
+            val handleRadius = 6.dp.toPx()
+            val handleStem = 8.dp.toPx()
+            val handleY = firstRect.bottom + handleStem
+
+            drawLine(
+                color = TEXT_SELECTION_HANDLE,
+                start = androidx.compose.ui.geometry.Offset(firstRect.left, firstRect.center.y),
+                end = androidx.compose.ui.geometry.Offset(firstRect.left, handleY),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawCircle(
+                color = TEXT_SELECTION_HANDLE,
+                radius = handleRadius,
+                center = androidx.compose.ui.geometry.Offset(firstRect.left, handleY),
+                style = Fill
+            )
+
+            drawLine(
+                color = TEXT_SELECTION_HANDLE,
+                start = androidx.compose.ui.geometry.Offset(lastRect.right, lastRect.center.y),
+                end = androidx.compose.ui.geometry.Offset(lastRect.right, handleY),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawCircle(
+                color = TEXT_SELECTION_HANDLE,
+                radius = handleRadius,
+                center = androidx.compose.ui.geometry.Offset(lastRect.right, handleY),
+                style = Fill
+            )
         }
     }
 }
@@ -835,6 +887,9 @@ private const val SEARCH_TARGET_VERTICAL_ANCHOR = 0.35f
 private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
 private const val LINK_TAP_MAX_DURATION_MS = 700L
 private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
+private val TEXT_SELECTION_FILL = Color(0x5535B9F5)
+private val TEXT_SELECTION_HANDLE = Color(0xCC35B9F5)
+
 @Composable
 private fun PageMessage(
     text: String

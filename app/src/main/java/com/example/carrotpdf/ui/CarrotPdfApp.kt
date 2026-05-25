@@ -553,7 +553,9 @@ private fun CarrotPdfContent(
                 },
                 onOpenPdf = openPdf,
                 onToggleChrome = {
-                    if (!isSearchVisible) {
+                    if (selectedTextSelection != null) {
+                        selectedTextSelection = null
+                    } else if (!isSearchVisible) {
                         isChromeVisible = !isChromeVisible
                     }
                 },
@@ -609,6 +611,7 @@ private fun CarrotPdfContent(
                         }
 
                         if (activeTabId == tabId && selection != null) {
+                            closeSearch()
                             selectedTextSelection = selection
                             isChromeVisible = true
                             isOverflowOpen = false
@@ -640,7 +643,7 @@ private fun CarrotPdfContent(
             )
 
             AnimatedVisibility(
-                visible = isChromeVisible && !isSearchVisible,
+                visible = isChromeVisible && !isSearchVisible && selectedTextSelection == null,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter)
@@ -669,7 +672,7 @@ private fun CarrotPdfContent(
             }
 
             AnimatedVisibility(
-                visible = isSearchVisible,
+                visible = isSearchVisible && selectedTextSelection == null,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
@@ -716,6 +719,29 @@ private fun CarrotPdfContent(
                             }
                         }
                     }
+                )
+            }
+
+            selectedTextSelection?.let { selection ->
+                ReaderTextSelectionBar(
+                    selectedText = selection.text,
+                    onBack = {
+                        selectedTextSelection = null
+                    },
+                    onCopy = {
+                        copyTextToClipboard(
+                            context = context,
+                            label = "PDF text",
+                            text = selection.text
+                        )
+                        Toast.makeText(
+                            context,
+                            "Text copied",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        selectedTextSelection = null
+                    },
+                    modifier = Modifier.align(Alignment.TopCenter)
                 )
             }
 
@@ -861,27 +887,6 @@ private fun CarrotPdfContent(
                 )
             }
 
-            selectedTextSelection?.let { selection ->
-                TextSelectionDialog(
-                    selection = selection,
-                    onCopy = {
-                        copyTextToClipboard(
-                            context = context,
-                            label = "PDF text",
-                            text = selection.text
-                        )
-                        Toast.makeText(
-                            context,
-                            "Text copied",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        selectedTextSelection = null
-                    },
-                    onDismiss = {
-                        selectedTextSelection = null
-                    }
-                )
-            }
         }
     }
 }
@@ -1004,36 +1009,6 @@ private fun ExternalLinkDialog(
                 TextButton(onClick = onDismiss) {
                     Text("Cancel")
                 }
-            }
-        }
-    )
-}
-
-@Composable
-private fun TextSelectionDialog(
-    selection: PdfTextSelection,
-    onCopy: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text("Copy text")
-        },
-        text = {
-            Text(
-                text = selection.text,
-                style = MaterialTheme.typography.bodyMedium
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onCopy) {
-                Text("Copy")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
             }
         }
     )
