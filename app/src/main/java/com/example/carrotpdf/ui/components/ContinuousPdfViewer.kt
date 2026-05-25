@@ -590,9 +590,9 @@ private fun SearchHighlightOverlay(
         results.forEach { result ->
             val isActive = result == activeSearchResult
             val color = if (isActive) {
-                Color(0x88FF8A1F)
+                Color(0x66FF8A1F)
             } else {
-                Color(0x77FFD84D)
+                Color(0x55FFD84D)
             }
 
             result.bounds.forEach { bound ->
@@ -601,13 +601,20 @@ private fun SearchHighlightOverlay(
                     val top = (bound.top / bound.pageHeight) * size.height
                     val right = (bound.right / bound.pageWidth) * size.width
                     val bottom = (bound.bottom / bound.pageHeight) * size.height
+                    val rect = expandHighlightRect(
+                        left = left,
+                        top = top,
+                        right = right,
+                        bottom = bottom,
+                        maxHeight = size.height
+                    )
 
                     drawRect(
                         color = color,
-                        topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                        topLeft = androidx.compose.ui.geometry.Offset(rect.left, rect.top),
                         size = androidx.compose.ui.geometry.Size(
-                            width = (right - left).coerceAtLeast(2f),
-                            height = (bottom - top).coerceAtLeast(2f)
+                            width = rect.width,
+                            height = rect.height
                         ),
                         style = Fill
                     )
@@ -619,6 +626,27 @@ private fun SearchHighlightOverlay(
 
 private fun List<PdfSearchResult>.searchResultsForPage(pageIndex: Int): List<PdfSearchResult> {
     return filter { it.pageIndex == pageIndex }
+}
+
+private fun expandHighlightRect(
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float,
+    maxHeight: Float
+): Rect {
+    val width = (right - left).coerceAtLeast(2f)
+    val height = (bottom - top).coerceAtLeast(2f)
+    val verticalExpansion = height * HIGHLIGHT_VERTICAL_EXPANSION_RATIO
+    val expandedTop = (top - verticalExpansion).coerceIn(0f, maxHeight)
+    val expandedBottom = (bottom + verticalExpansion).coerceIn(0f, maxHeight)
+
+    return Rect(
+        left = left,
+        top = expandedTop,
+        right = left + width,
+        bottom = expandedBottom.coerceAtLeast(expandedTop + 2f)
+    )
 }
 
 private fun List<PdfLinkRegion>.linkRegionsForPage(pageIndex: Int): List<PdfLinkRegion> {
@@ -641,14 +669,13 @@ private fun TextSelectionOverlay(
                 val top = (bound.top / bound.pageHeight) * size.height
                 val right = (bound.right / bound.pageWidth) * size.width
                 val bottom = (bound.bottom / bound.pageHeight) * size.height
-                val width = (right - left).coerceAtLeast(2f)
-                val height = (bottom - top).coerceAtLeast(2f)
 
-                Rect(
+                expandHighlightRect(
                     left = left,
                     top = top,
-                    right = left + width,
-                    bottom = top + height
+                    right = right,
+                    bottom = bottom,
+                    maxHeight = size.height
                 )
             } else {
                 null
@@ -887,7 +914,8 @@ private const val SEARCH_TARGET_VERTICAL_ANCHOR = 0.35f
 private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
 private const val LINK_TAP_MAX_DURATION_MS = 700L
 private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
-private val TEXT_SELECTION_FILL = Color(0x5535B9F5)
+private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.18f
+private val TEXT_SELECTION_FILL = Color(0x4435B9F5)
 private val TEXT_SELECTION_HANDLE = Color(0xCC35B9F5)
 
 @Composable
