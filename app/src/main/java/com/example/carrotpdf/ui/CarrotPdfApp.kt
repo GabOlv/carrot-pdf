@@ -200,10 +200,12 @@ private fun CarrotPdfContent(
     var currentPaperBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
     var reimportingTabId by remember { mutableStateOf<String?>(null) }
     var isWorkspaceOpen by remember { mutableStateOf(false) }
+    var isWorkspaceExpanded by remember { mutableStateOf(false) }
     var workspaceMode by remember { mutableStateOf(WorkspaceMode.Notes) }
     var workspaceDrawTarget by remember { mutableStateOf(DrawTarget.Canvas) }
     var workspaceDrawTool by remember { mutableStateOf(WorkspaceDrawTool.Pen) }
     var workspaceInkColor by remember { mutableStateOf(DEFAULT_WORKSPACE_INK_COLOR) }
+    var workspaceStrokeWidth by remember { mutableFloatStateOf(DEFAULT_WORKSPACE_STROKE_WIDTH) }
     var workspaceNotesText by remember { mutableStateOf("") }
     var workspaceCanvasStrokes by remember { mutableStateOf<List<CanvasInkStroke>>(emptyList()) }
     var workspacePageInkStrokes by remember { mutableStateOf<List<PageInkStroke>>(emptyList()) }
@@ -213,6 +215,7 @@ private fun CarrotPdfContent(
     val isPdfInkActive = isWorkspaceOpen &&
         workspaceMode == WorkspaceMode.Draw &&
         workspaceDrawTarget == DrawTarget.Pdf &&
+        workspaceDrawTool != WorkspaceDrawTool.Move &&
         activeTab != null &&
         !activeTab.isMissing
     val activePdfInkTool = if (workspaceDrawTool == WorkspaceDrawTool.Eraser) {
@@ -220,6 +223,7 @@ private fun CarrotPdfContent(
     } else {
         InkTool.Pen
     }
+    val activePdfInkWidth = workspaceStrokeWidth.toPdfInkWidth()
     val activeViewerState = rememberActiveViewerState(activeTab)
     val activeSearchSession = remember(activeTab?.id, activeTab?.uri, activeTab?.isMissing) {
         activeTab?.takeUnless { it.isMissing }?.let { tab ->
@@ -831,6 +835,7 @@ private fun CarrotPdfContent(
                 isPdfInkActive = isPdfInkActive,
                 pdfInkTool = activePdfInkTool,
                 pdfInkColor = workspaceInkColor,
+                pdfInkWidth = activePdfInkWidth,
                 pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                     DrivePageIndicator(
                         currentPage = currentPage,
@@ -1129,6 +1134,11 @@ private fun CarrotPdfContent(
                     FloatingAnnotationButton(
                         onClick = {
                             isWorkspaceOpen = true
+                            workspaceMode = WorkspaceMode.Draw
+                            workspaceDrawTarget = DrawTarget.Pdf
+                            workspaceDrawTool = WorkspaceDrawTool.Pen
+                            selectedExternalLink = null
+                            selectedTextSelection = null
                             isChromeVisible = true
                         }
                     )
@@ -1227,6 +1237,15 @@ private fun CarrotPdfContent(
                 activeTab != null &&
                 !isCapturingScreenshot
             ) {
+                val mobileWorkspaceHeight = if (isWorkspaceExpanded) {
+                    (maxHeight - statusBarTop - TOP_BAR_HEIGHT - navigationBarBottom - 12.dp)
+                        .coerceAtLeast(WORKSPACE_DEFAULT_HEIGHT)
+                } else if (workspaceMode == WorkspaceMode.Draw && workspaceDrawTarget == DrawTarget.Pdf) {
+                    WORKSPACE_PDF_DRAW_HEIGHT
+                } else {
+                    WORKSPACE_DEFAULT_HEIGHT
+                }
+
                 NotesWorkspaceSheet(
                     notesText = workspaceNotesText,
                     onNotesChange = { text ->
@@ -1256,6 +1275,10 @@ private fun CarrotPdfContent(
                     onInkColorChange = { color ->
                         workspaceInkColor = color
                     },
+                    selectedStrokeWidth = workspaceStrokeWidth,
+                    onStrokeWidthChange = { width ->
+                        workspaceStrokeWidth = width
+                    },
                     canvasStrokes = workspaceCanvasStrokes,
                     onCanvasStrokesChange = { strokes ->
                         workspaceCanvasStrokes = strokes
@@ -1269,6 +1292,10 @@ private fun CarrotPdfContent(
                     onCollapse = {
                         isWorkspaceOpen = false
                     },
+                    isExpanded = isWorkspaceExpanded,
+                    onExpandedChange = { expanded ->
+                        isWorkspaceExpanded = expanded
+                    },
                     layout = if (isTabletWorkspace) {
                         WorkspaceSheetLayout.Side
                     } else {
@@ -1277,7 +1304,7 @@ private fun CarrotPdfContent(
                     modifier = if (isTabletWorkspace) {
                         Modifier
                             .align(Alignment.CenterEnd)
-                            .width(320.dp)
+                            .width(400.dp)
                             .padding(
                                 top = statusBarTop + TOP_BAR_HEIGHT + 8.dp,
                                 end = 14.dp,
@@ -1286,6 +1313,7 @@ private fun CarrotPdfContent(
                     } else {
                         Modifier
                             .align(Alignment.BottomCenter)
+                            .height(mobileWorkspaceHeight)
                             .padding(bottom = navigationBarBottom)
                     }
                 )
@@ -1498,14 +1526,59 @@ private fun List<PageInkStroke>.erasePageInkStrokes(
 
     return filterNot { stroke ->
         stroke.pageIndex == pageIndex &&
-            stroke.points.any { point ->
-                erasePoints.any { eraser ->
-                    val dx = point.x - eraser.x
-                    val dy = point.y - eraser.y
-                    dx * dx + dy * dy <= PAGE_INK_ERASER_RADIUS * PAGE_INK_ERASER_RADIUS
-                }
-            }
+            stroke.points.isNearPageInkPath(
+                testPoints = erasePoints,
+                radius = max(PAGE_INK_ERASER_RADIUS, stroke.width * 1.8f)
+            )
     }
+}
+
+private fun List<InkPoint>.isNearPageInkPath(
+    testPoints: List<InkPoint>,
+    radius: Float
+): Boolean {
+    if (isEmpty() || testPoints.isEmpty()) {
+        return false
+    }
+
+    val radiusSquared = radius * radius
+
+    return testPoints.any { testPoint ->
+        any { point ->
+            point.distanceSquaredTo(testPoint) <= radiusSquared
+        } || zipWithNext().any { (start, end) ->
+            testPoint.distanceSquaredToSegment(start, end) <= radiusSquared
+        }
+    }
+}
+
+private fun InkPoint.distanceSquaredTo(other: InkPoint): Float {
+    val dx = x - other.x
+    val dy = y - other.y
+
+    return dx * dx + dy * dy
+}
+
+private fun InkPoint.distanceSquaredToSegment(
+    start: InkPoint,
+    end: InkPoint
+): Float {
+    val dx = end.x - start.x
+    val dy = end.y - start.y
+    val lengthSquared = dx * dx + dy * dy
+
+    if (lengthSquared <= 0.000001f) {
+        return distanceSquaredTo(start)
+    }
+
+    val t = (((x - start.x) * dx + (y - start.y) * dy) / lengthSquared)
+        .coerceIn(0f, 1f)
+    val projection = InkPoint(
+        x = start.x + t * dx,
+        y = start.y + t * dy
+    )
+
+    return distanceSquaredTo(projection)
 }
 
 private fun PdfViewerState.requestScrollToSearchResult(
@@ -1691,5 +1764,13 @@ const val DOCUMENT_LOAD_TIMEOUT_MS = 12_000L
 const val SCREENSHOT_CAPTURE_DELAY_MS = 120L
 const val WORKSPACE_SAVE_DEBOUNCE_MS = 450L
 const val DEFAULT_WORKSPACE_INK_COLOR = 0xFFFF7A1AL
+const val DEFAULT_WORKSPACE_STROKE_WIDTH = 34f
+const val PDF_INK_WIDTH_DENOMINATOR = 7000f
+val WORKSPACE_DEFAULT_HEIGHT = 326.dp
+val WORKSPACE_PDF_DRAW_HEIGHT = 226.dp
 val TABLET_WORKSPACE_BREAKPOINT = 700.dp
 const val PAGE_INK_ERASER_RADIUS = 0.022f
+
+private fun Float.toPdfInkWidth(): Float {
+    return (this / PDF_INK_WIDTH_DENOMINATOR).coerceIn(0.0025f, 0.009f)
+}

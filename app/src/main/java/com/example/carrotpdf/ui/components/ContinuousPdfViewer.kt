@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -101,6 +102,7 @@ fun ContinuousPdfViewer(
     isPdfInkActive: Boolean = false,
     pdfInkTool: InkTool = InkTool.Pen,
     pdfInkColor: Long = DEFAULT_PDF_INK_COLOR,
+    pdfInkWidth: Float = DEFAULT_PDF_INK_WIDTH,
     onLinkTap: (PdfLinkRegion) -> Unit = {},
     onPdfInkStroke: (PageInkStroke) -> Unit = {},
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit = { _, _ -> },
@@ -478,6 +480,7 @@ fun ContinuousPdfViewer(
                                 isPdfInkActive = isPdfInkActive,
                                 pdfInkTool = pdfInkTool,
                                 pdfInkColor = pdfInkColor,
+                                pdfInkWidth = pdfInkWidth,
                                 selectedTextSelection = selectedTextSelection
                                     ?.takeIf { selection -> selection.hasSelectionOnPage(pageIndex) },
                                 suppressPageOverlays = suppressPageOverlays,
@@ -495,6 +498,19 @@ fun ContinuousPdfViewer(
                         }
                     }
                 }
+            }
+
+            if (isPdfInkActive) {
+                PdfInkScrollStrip(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .width(PDF_INK_SCROLL_STRIP_WIDTH)
+                        .scrollable(
+                            state = scrollableState,
+                            orientation = Orientation.Vertical
+                        )
+                )
             }
 
             pageIndicatorContent(
@@ -531,6 +547,7 @@ private fun PdfPageItem(
     isPdfInkActive: Boolean,
     pdfInkTool: InkTool,
     pdfInkColor: Long,
+    pdfInkWidth: Float,
     selectedTextSelection: PdfTextSelection?,
     suppressPageOverlays: Boolean,
     onLinkTap: (PdfLinkRegion) -> Unit,
@@ -647,6 +664,7 @@ private fun PdfPageItem(
                             strokes = pageInkStrokes,
                             previewPoints = currentPageInkPoints,
                             previewColor = pdfInkColor,
+                            previewWidth = pdfInkWidth,
                             modifier = Modifier.fillMaxSize()
                         )
 
@@ -661,6 +679,7 @@ private fun PdfPageItem(
                                 pageIndex = pageIndex,
                                 tool = pdfInkTool,
                                 color = pdfInkColor,
+                                width = pdfInkWidth,
                                 onPreviewChange = { points ->
                                     currentPageInkPoints = points
                                 },
@@ -695,6 +714,30 @@ private fun PdfPageItem(
                 PageMessage("Page ${pageIndex + 1}")
             }
         }
+    }
+}
+
+@Composable
+private fun PdfInkScrollStrip(
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val trackWidth = 2.dp.toPx()
+        val insetTop = 18.dp.toPx()
+        val insetBottom = 18.dp.toPx()
+
+        drawRoundRect(
+            color = Color.Black.copy(alpha = 0.08f),
+            topLeft = Offset(
+                x = 10.dp.toPx(),
+                y = insetTop
+            ),
+            size = androidx.compose.ui.geometry.Size(
+                width = trackWidth,
+                height = (size.height - insetTop - insetBottom).coerceAtLeast(0f)
+            ),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(999f)
+        )
     }
 }
 
@@ -755,6 +798,7 @@ private fun PdfPageInkOverlay(
     strokes: List<PageInkStroke>,
     previewPoints: List<InkPoint>,
     previewColor: Long,
+    previewWidth: Float,
     modifier: Modifier = Modifier
 ) {
     if (strokes.isEmpty() && previewPoints.isEmpty()) {
@@ -774,7 +818,7 @@ private fun PdfPageInkOverlay(
             drawPageInkStroke(
                 points = previewPoints,
                 color = Color(previewColor.toInt()),
-                width = DEFAULT_PDF_INK_WIDTH
+                width = previewWidth
             )
         }
     }
@@ -785,6 +829,7 @@ private fun PdfPageInkInputOverlay(
     pageIndex: Int,
     tool: InkTool,
     color: Long,
+    width: Float,
     onPreviewChange: (List<InkPoint>) -> Unit,
     onStroke: (PageInkStroke) -> Unit,
     onErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
@@ -795,6 +840,7 @@ private fun PdfPageInkInputOverlay(
     val currentOnErase = rememberUpdatedState(onErase)
     val currentTool = rememberUpdatedState(tool)
     val currentColor = rememberUpdatedState(color)
+    val currentWidth = rememberUpdatedState(width)
 
     Box(
         modifier = modifier.pointerInput(pageIndex, tool) {
@@ -838,7 +884,7 @@ private fun PdfPageInkInputOverlay(
                                         pageIndex = pageIndex,
                                         tool = InkTool.Pen,
                                         color = currentColor.value,
-                                        width = DEFAULT_PDF_INK_WIDTH,
+                                        width = currentWidth.value,
                                         points = points
                                     )
                                 )
@@ -859,9 +905,13 @@ private fun PdfPageInkInputOverlay(
                     val change = pressedChanges.first()
 
                     if (!isMultiTouchGesture) {
-                        points = points + change.position.toNormalizedInkPoint(
+                        val nextPoint = change.position.toNormalizedInkPoint(
                             width = canvasWidth,
                             height = canvasHeight
+                        )
+                        points = points.appendInkPointIfFarEnough(
+                            point = nextPoint,
+                            minDistance = MIN_PDF_INK_POINT_DISTANCE
                         )
                         if (currentTool.value == InkTool.Pen) {
                             currentOnPreviewChange.value(points)
@@ -898,20 +948,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPageInkStroke(
         return
     }
 
-    val path = Path().apply {
-        val first = points.first()
-        moveTo(
-            x = first.x.coerceIn(0f, 1f) * size.width,
-            y = first.y.coerceIn(0f, 1f) * size.height
-        )
-
-        points.drop(1).forEach { point ->
-            lineTo(
-                x = point.x.coerceIn(0f, 1f) * size.width,
-                y = point.y.coerceIn(0f, 1f) * size.height
-            )
-        }
-    }
+    val path = smoothedPageInkPath(points)
 
     drawPath(
         path = path,
@@ -922,6 +959,56 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPageInkStroke(
             join = StrokeJoin.Round
         )
     )
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.smoothedPageInkPath(
+    points: List<InkPoint>
+): Path {
+    val transformed = points.map { point ->
+        Offset(
+            x = point.x.coerceIn(0f, 1f) * size.width,
+            y = point.y.coerceIn(0f, 1f) * size.height
+        )
+    }
+
+    return Path().apply {
+        val first = transformed.first()
+        moveTo(first.x, first.y)
+
+        if (transformed.size == 2) {
+            val last = transformed.last()
+            lineTo(last.x, last.y)
+            return@apply
+        }
+
+        for (index in 1 until transformed.lastIndex) {
+            val current = transformed[index]
+            val next = transformed[index + 1]
+            val mid = Offset(
+                x = (current.x + next.x) / 2f,
+                y = (current.y + next.y) / 2f
+            )
+            quadraticTo(current.x, current.y, mid.x, mid.y)
+        }
+
+        val last = transformed.last()
+        lineTo(last.x, last.y)
+    }
+}
+
+private fun List<InkPoint>.appendInkPointIfFarEnough(
+    point: InkPoint,
+    minDistance: Float
+): List<InkPoint> {
+    val lastPoint = lastOrNull() ?: return this + point
+    val dx = point.x - lastPoint.x
+    val dy = point.y - lastPoint.y
+
+    return if (dx * dx + dy * dy >= minDistance * minDistance) {
+        this + point
+    } else {
+        this
+    }
 }
 
 private fun Offset.toNormalizedInkPoint(
@@ -1388,6 +1475,8 @@ private const val PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO = 0.45f
 private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.18f
 private const val DEFAULT_PDF_INK_COLOR = 0xFFFF7A1AL
 private const val DEFAULT_PDF_INK_WIDTH = 0.0048f
+private const val MIN_PDF_INK_POINT_DISTANCE = 0.0018f
+private val PDF_INK_SCROLL_STRIP_WIDTH = 44.dp
 private val TEXT_SELECTION_HANDLE_STEM = 5.dp
 private val TEXT_SELECTION_HANDLE_STEM_WIDTH = 1.6.dp
 private val TEXT_SELECTION_HANDLE_RADIUS = 5.6.dp

@@ -133,6 +133,7 @@ fun ReaderStage(
     isPdfInkActive: Boolean,
     pdfInkTool: InkTool,
     pdfInkColor: Long,
+    pdfInkWidth: Float,
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
         pageCount: Int,
@@ -214,6 +215,7 @@ fun ReaderStage(
                     isPdfInkActive = isPdfInkActive,
                     pdfInkTool = pdfInkTool,
                     pdfInkColor = pdfInkColor,
+                    pdfInkWidth = pdfInkWidth,
                     onLinkTap = onLinkTap,
                     onPdfInkStroke = onPdfInkStroke,
                     onPdfInkErase = onPdfInkErase,

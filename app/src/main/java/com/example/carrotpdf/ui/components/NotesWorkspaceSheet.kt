@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
@@ -56,6 +58,7 @@ import com.example.carrotpdf.workspace.CanvasInkStroke
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import java.util.UUID
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -92,11 +95,15 @@ fun NotesWorkspaceSheet(
     onDrawToolChange: (WorkspaceDrawTool) -> Unit,
     selectedInkColor: Long,
     onInkColorChange: (Long) -> Unit,
+    selectedStrokeWidth: Float,
+    onStrokeWidthChange: (Float) -> Unit,
     canvasStrokes: List<CanvasInkStroke>,
     onCanvasStrokesChange: (List<CanvasInkStroke>) -> Unit,
     pageInkStrokeCount: Int,
     onUndoPageInk: () -> Unit,
     onCollapse: () -> Unit,
+    isExpanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     layout: WorkspaceSheetLayout,
     modifier: Modifier = Modifier
 ) {
@@ -130,6 +137,7 @@ fun NotesWorkspaceSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight()
                 .border(
                     width = 1.dp,
                     color = Color.Black.copy(alpha = 0.08f),
@@ -138,14 +146,10 @@ fun NotesWorkspaceSheet(
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             if (!isSideLayout) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .size(width = 42.dp, height = 4.dp)
-                        .background(
-                            color = Color.Black.copy(alpha = 0.28f),
-                            shape = RoundedCornerShape(999.dp)
-                        )
+                WorkspaceDragHandle(
+                    isExpanded = isExpanded,
+                    onExpandedChange = onExpandedChange,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -156,18 +160,18 @@ fun NotesWorkspaceSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Spacer(modifier = Modifier.weight(1f))
-                WorkspaceTabLabel(
-                    text = "Notes",
+                WorkspaceModeButton(
+                    mode = WorkspaceMode.Notes,
                     selected = selectedMode == WorkspaceMode.Notes,
                     onClick = {
                         onModeChange(WorkspaceMode.Notes)
                     }
                 )
 
-                Spacer(modifier = Modifier.width(36.dp))
+                Spacer(modifier = Modifier.width(16.dp))
 
-                WorkspaceTabLabel(
-                    text = "Draw",
+                WorkspaceModeButton(
+                    mode = WorkspaceMode.Draw,
                     selected = selectedMode == WorkspaceMode.Draw,
                     onClick = {
                         onModeChange(WorkspaceMode.Draw)
@@ -183,7 +187,8 @@ fun NotesWorkspaceSheet(
                 WorkspaceMode.Notes -> NotesEditor(
                     notesText = notesText,
                     onNotesChange = onNotesChange,
-                    isSideLayout = isSideLayout
+                    isSideLayout = isSideLayout,
+                    modifier = Modifier.weight(1f)
                 )
 
                 WorkspaceMode.Draw -> DrawWorkspace(
@@ -193,11 +198,14 @@ fun NotesWorkspaceSheet(
                     onDrawToolChange = onDrawToolChange,
                     selectedInkColor = selectedInkColor,
                     onInkColorChange = onInkColorChange,
+                    selectedStrokeWidth = selectedStrokeWidth,
+                    onStrokeWidthChange = onStrokeWidthChange,
                     canvasStrokes = canvasStrokes,
                     onCanvasStrokesChange = onCanvasStrokesChange,
                     pageInkStrokeCount = pageInkStrokeCount,
                     onUndoPageInk = onUndoPageInk,
-                    isSideLayout = isSideLayout
+                    isSideLayout = isSideLayout,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -208,44 +216,68 @@ fun NotesWorkspaceSheet(
 private fun NotesEditor(
     notesText: String,
     onNotesChange: (String) -> Unit,
-    isSideLayout: Boolean
+    isSideLayout: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    BasicTextField(
-        value = notesText,
-        onValueChange = onNotesChange,
+    val scrollState = rememberScrollState()
+    val fieldShape = RoundedCornerShape(12.dp)
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(
-                min = if (isSideLayout) 260.dp else 150.dp,
-                max = if (isSideLayout) 720.dp else 260.dp
-            )
+            .then(modifier)
             .background(
                 color = Color.White,
-                shape = RoundedCornerShape(12.dp)
+                shape = fieldShape
             )
             .border(
                 width = 1.dp,
                 color = Color.Black.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(12.dp)
+                shape = fieldShape
             )
-            .verticalScroll(rememberScrollState())
-            .padding(14.dp),
-        textStyle = MaterialTheme.typography.bodyMedium.copy(
-            color = Color(0xFF1D2228)
-        ),
-        cursorBrush = SolidColor(CarrotColors.Accent),
-        decorationBox = { innerTextField ->
-            if (notesText.isBlank()) {
-                Text(
-                    text = "Type your notes...",
-                    color = Color(0xFF8D949C),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
+            .clip(fieldShape)
+    ) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val lineSpacing = 24.dp.toPx()
+            val leftInset = 14.dp.toPx()
+            val rightInset = size.width - 14.dp.toPx()
+            var y = 42.dp.toPx()
 
-            innerTextField()
+            while (y < size.height) {
+                drawLine(
+                    color = Color.Black.copy(alpha = 0.055f),
+                    start = Offset(leftInset, y),
+                    end = Offset(rightInset, y),
+                    strokeWidth = 1f
+                )
+                y += lineSpacing
+            }
         }
-    )
+
+        BasicTextField(
+            value = notesText,
+            onValueChange = onNotesChange,
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(14.dp),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                color = Color(0xFF1D2228)
+            ),
+            cursorBrush = SolidColor(CarrotColors.Accent),
+            decorationBox = { innerTextField ->
+                if (notesText.isBlank()) {
+                    Text(
+                        text = "Type your notes...",
+                        color = Color(0xFF8D949C),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                innerTextField()
+            }
+        )
+    }
 }
 
 @Composable
@@ -256,38 +288,49 @@ private fun DrawWorkspace(
     onDrawToolChange: (WorkspaceDrawTool) -> Unit,
     selectedInkColor: Long,
     onInkColorChange: (Long) -> Unit,
+    selectedStrokeWidth: Float,
+    onStrokeWidthChange: (Float) -> Unit,
     canvasStrokes: List<CanvasInkStroke>,
     onCanvasStrokesChange: (List<CanvasInkStroke>) -> Unit,
     pageInkStrokeCount: Int,
     onUndoPageInk: () -> Unit,
-    isSideLayout: Boolean
+    isSideLayout: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DrawChip(
-                text = "Canvas",
-                selected = selectedDrawTarget == DrawTarget.Canvas,
-                onClick = {
-                    onDrawTargetChange(DrawTarget.Canvas)
+    Column(modifier = modifier.fillMaxWidth()) {
+        DrawControlHeader(
+            selectedDrawTarget = selectedDrawTarget,
+            onDrawTargetChange = onDrawTargetChange,
+            selectedTool = selectedDrawTool,
+            onToolChange = onDrawToolChange,
+            canUndo = if (selectedDrawTarget == DrawTarget.Canvas) {
+                canvasStrokes.isNotEmpty()
+            } else {
+                pageInkStrokeCount > 0
+            },
+            onUndo = {
+                if (selectedDrawTarget == DrawTarget.Canvas) {
+                    if (canvasStrokes.isNotEmpty()) {
+                        onCanvasStrokesChange(canvasStrokes.dropLast(1))
+                    }
+                } else {
+                    onUndoPageInk()
                 }
-            )
-
-            Spacer(modifier = Modifier.width(10.dp))
-
-            DrawChip(
-                text = "PDF",
-                selected = selectedDrawTarget == DrawTarget.Pdf,
-                onClick = {
-                    onDrawTargetChange(DrawTarget.Pdf)
-                }
-            )
-        }
+            }
+        )
 
         Spacer(modifier = Modifier.height(10.dp))
+
+        DrawColorSizeRow(
+            selectedColor = selectedInkColor,
+            onColorChange = onInkColorChange,
+            selectedStrokeWidth = selectedStrokeWidth,
+            onStrokeWidthChange = onStrokeWidthChange
+        )
+
+        if (selectedDrawTarget == DrawTarget.Canvas) {
+            Spacer(modifier = Modifier.height(10.dp))
+        }
 
         when (selectedDrawTarget) {
             DrawTarget.Canvas -> FreeDrawCanvas(
@@ -297,18 +340,13 @@ private fun DrawWorkspace(
                 onToolChange = onDrawToolChange,
                 selectedColor = selectedInkColor,
                 onColorChange = onInkColorChange,
-                isSideLayout = isSideLayout
+                selectedStrokeWidth = selectedStrokeWidth,
+                onStrokeWidthChange = onStrokeWidthChange,
+                isSideLayout = isSideLayout,
+                modifier = if (isSideLayout) Modifier.weight(1f) else Modifier
             )
 
-            DrawTarget.Pdf -> PdfDrawPanel(
-                selectedTool = selectedDrawTool.takeIf { tool -> tool != WorkspaceDrawTool.Move }
-                    ?: WorkspaceDrawTool.Pen,
-                onToolChange = onDrawToolChange,
-                selectedColor = selectedInkColor,
-                onColorChange = onInkColorChange,
-                strokeCount = pageInkStrokeCount,
-                onUndo = onUndoPageInk
-            )
+            DrawTarget.Pdf -> Unit
         }
     }
 }
@@ -321,7 +359,10 @@ private fun FreeDrawCanvas(
     onToolChange: (WorkspaceDrawTool) -> Unit,
     selectedColor: Long,
     onColorChange: (Long) -> Unit,
-    isSideLayout: Boolean
+    selectedStrokeWidth: Float,
+    onStrokeWidthChange: (Float) -> Unit,
+    isSideLayout: Boolean,
+    modifier: Modifier = Modifier
 ) {
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var canvasScale by remember { mutableFloatStateOf(INITIAL_CANVAS_SCALE) }
@@ -329,6 +370,7 @@ private fun FreeDrawCanvas(
     var currentStrokePoints by remember { mutableStateOf<List<InkPoint>>(emptyList()) }
     val latestStrokes by rememberUpdatedState(strokes)
     val latestSelectedColor by rememberUpdatedState(selectedColor)
+    val latestSelectedStrokeWidth by rememberUpdatedState(selectedStrokeWidth)
     val latestOnStrokesChange by rememberUpdatedState(onStrokesChange)
 
     fun clampOffset(offset: Offset, scale: Float): Offset {
@@ -361,31 +403,16 @@ private fun FreeDrawCanvas(
         )
     }
 
-    Column {
-        DrawToolbar(
-            selectedTool = selectedTool,
-            onToolChange = { tool ->
-                onToolChange(tool)
-                currentStrokePoints = emptyList()
-            },
-            selectedColor = selectedColor,
-            onColorChange = { color ->
-                onColorChange(color)
-            },
-            canUndo = strokes.isNotEmpty(),
-            onUndo = {
-                if (strokes.isNotEmpty()) {
-                    onStrokesChange(strokes.dropLast(1))
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (isSideLayout) {
+                    Modifier.fillMaxHeight()
+                } else {
+                    Modifier.height(178.dp)
                 }
-            }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (isSideLayout) 360.dp else 260.dp)
+            )
                 .background(
                     color = Color(0xFFF9F8F4),
                     shape = RoundedCornerShape(12.dp)
@@ -434,7 +461,7 @@ private fun FreeDrawCanvas(
                                             id = UUID.randomUUID().toString(),
                                             tool = InkTool.Pen,
                                             color = latestSelectedColor,
-                                            width = DEFAULT_CANVAS_STROKE_WIDTH,
+                                            width = latestSelectedStrokeWidth,
                                             points = gestureStrokePoints
                                         )
                                     )
@@ -503,10 +530,16 @@ private fun FreeDrawCanvas(
                                         canvasScale
                                     )
                                 } else if (selectedTool == WorkspaceDrawTool.Eraser) {
-                                    erasePoints = erasePoints + screenToCanvas(change.position)
+                                    erasePoints = erasePoints.appendInkPointIfFarEnough(
+                                        point = screenToCanvas(change.position),
+                                        minDistance = CANVAS_ERASER_SAMPLE_DISTANCE
+                                    )
                                 } else {
-                                    gestureStrokePoints = gestureStrokePoints +
-                                        screenToCanvas(change.position)
+                                    gestureStrokePoints = gestureStrokePoints.appendInkPointIfFarEnough(
+                                        point = screenToCanvas(change.position),
+                                        minDistance = (latestSelectedStrokeWidth * 0.16f)
+                                            .coerceAtLeast(MIN_CANVAS_INK_POINT_DISTANCE)
+                                    )
                                     currentStrokePoints = gestureStrokePoints
                                 }
 
@@ -515,33 +548,155 @@ private fun FreeDrawCanvas(
                         }
                     }
                 }
-        ) {
-            Canvas(modifier = Modifier.matchParentSize()) {
-                drawWorkspaceGrid(
+    ) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            strokes.forEach { stroke ->
+                drawInkStroke(
+                    points = stroke.points,
+                    color = argbColor(stroke.color),
+                    width = stroke.width,
                     canvasOffset = canvasOffset,
                     canvasScale = canvasScale
                 )
-
-                strokes.forEach { stroke ->
-                    drawInkStroke(
-                        points = stroke.points,
-                        color = argbColor(stroke.color),
-                        width = stroke.width,
-                        canvasOffset = canvasOffset,
-                        canvasScale = canvasScale
-                    )
-                }
-
-                if (currentStrokePoints.isNotEmpty()) {
-                    drawInkStroke(
-                        points = currentStrokePoints,
-                        color = argbColor(selectedColor),
-                        width = DEFAULT_CANVAS_STROKE_WIDTH,
-                        canvasOffset = canvasOffset,
-                        canvasScale = canvasScale
-                    )
-                }
             }
+
+            if (currentStrokePoints.isNotEmpty()) {
+                drawInkStroke(
+                    points = currentStrokePoints,
+                    color = argbColor(selectedColor),
+                    width = selectedStrokeWidth,
+                    canvasOffset = canvasOffset,
+                    canvasScale = canvasScale
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrawControlHeader(
+    selectedDrawTarget: DrawTarget,
+    onDrawTargetChange: (DrawTarget) -> Unit,
+    selectedTool: WorkspaceDrawTool,
+    onToolChange: (WorkspaceDrawTool) -> Unit,
+    canUndo: Boolean,
+    onUndo: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        DrawTargetButton(
+            target = DrawTarget.Canvas,
+            selected = selectedDrawTarget == DrawTarget.Canvas,
+            onClick = {
+                onDrawTargetChange(DrawTarget.Canvas)
+            }
+        )
+
+        DrawTargetButton(
+            target = DrawTarget.Pdf,
+            selected = selectedDrawTarget == DrawTarget.Pdf,
+            onClick = {
+                onDrawTargetChange(DrawTarget.Pdf)
+            }
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        CompactDrawToolButton(
+            tool = WorkspaceDrawTool.Pen,
+            selected = selectedTool == WorkspaceDrawTool.Pen,
+            onClick = {
+                onToolChange(WorkspaceDrawTool.Pen)
+            }
+        )
+
+        CompactDrawToolButton(
+            tool = WorkspaceDrawTool.Move,
+            selected = selectedTool == WorkspaceDrawTool.Move,
+            onClick = {
+                onToolChange(WorkspaceDrawTool.Move)
+            }
+        )
+
+        CompactDrawToolButton(
+            tool = WorkspaceDrawTool.Eraser,
+            selected = selectedTool == WorkspaceDrawTool.Eraser,
+            onClick = {
+                onToolChange(WorkspaceDrawTool.Eraser)
+            }
+        )
+
+        DrawIconAction(
+            icon = DrawActionIcon.Undo,
+            enabled = canUndo,
+            onClick = onUndo
+        )
+    }
+}
+
+@Composable
+private fun DrawColorSizeRow(
+    selectedColor: Long,
+    onColorChange: (Long) -> Unit,
+    selectedStrokeWidth: Float,
+    onStrokeWidthChange: (Float) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        DRAW_COLORS.forEach { color ->
+            ColorSwatch(
+                color = color,
+                selected = color == selectedColor,
+                onClick = {
+                    onColorChange(color)
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        StrokeSizeSelector(
+            selectedStrokeWidth = selectedStrokeWidth,
+            onStrokeWidthChange = onStrokeWidthChange
+        )
+    }
+}
+
+@Composable
+private fun CompactDrawToolButton(
+    tool: WorkspaceDrawTool,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val accent = CarrotColors.Accent
+    val iconColor = if (selected) accent else Color(0xFF3A424A)
+
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .background(
+                color = if (selected) accent.copy(alpha = 0.12f) else Color.Transparent,
+                shape = RoundedCornerShape(999.dp)
+            )
+            .border(
+                width = if (selected) 1.dp else 0.dp,
+                color = if (selected) accent else Color.Transparent,
+                shape = RoundedCornerShape(999.dp)
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.size(20.dp)) {
+            drawToolIcon(
+                tool = tool,
+                color = iconColor
+            )
         }
     }
 }
@@ -552,6 +707,8 @@ private fun PdfDrawPanel(
     onToolChange: (WorkspaceDrawTool) -> Unit,
     selectedColor: Long,
     onColorChange: (Long) -> Unit,
+    selectedStrokeWidth: Float,
+    onStrokeWidthChange: (Float) -> Unit,
     strokeCount: Int,
     onUndo: () -> Unit
 ) {
@@ -562,15 +719,16 @@ private fun PdfDrawPanel(
         DrawToolbar(
             selectedTool = selectedTool,
             onToolChange = { tool ->
-                if (tool != WorkspaceDrawTool.Move) {
-                    onToolChange(tool)
-                }
+                onToolChange(tool)
             },
             selectedColor = selectedColor,
             onColorChange = onColorChange,
+            selectedStrokeWidth = selectedStrokeWidth,
+            onStrokeWidthChange = onStrokeWidthChange,
             canUndo = strokeCount > 0,
             onUndo = onUndo,
-            showMove = false
+            showMove = true,
+            showUndo = false
         )
     }
 }
@@ -581,9 +739,12 @@ private fun DrawToolbar(
     onToolChange: (WorkspaceDrawTool) -> Unit,
     selectedColor: Long,
     onColorChange: (Long) -> Unit,
+    selectedStrokeWidth: Float,
+    onStrokeWidthChange: (Float) -> Unit,
     canUndo: Boolean,
     onUndo: () -> Unit,
-    showMove: Boolean = true
+    showMove: Boolean = true,
+    showUndo: Boolean = true
 ) {
     Column {
         Row(
@@ -614,22 +775,26 @@ private fun DrawToolbar(
                 )
             }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                DrawIconAction(
-                    text = "Undo",
-                    icon = DrawActionIcon.Undo,
-                    enabled = canUndo,
-                    onClick = onUndo
-                )
+            if (showUndo) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DrawIconAction(
+                        icon = DrawActionIcon.Undo,
+                        enabled = canUndo,
+                        onClick = onUndo
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.width(42.dp))
             }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
         Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -642,6 +807,13 @@ private fun DrawToolbar(
                     }
                 )
             }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            StrokeSizeSelector(
+                selectedStrokeWidth = selectedStrokeWidth,
+                onStrokeWidthChange = onStrokeWidthChange
+            )
         }
     }
 }
@@ -696,14 +868,24 @@ private fun DrawToolButton(
 
 @Composable
 private fun DrawIconAction(
-    text: String,
     icon: DrawActionIcon,
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.clickable(enabled = enabled) { onClick() },
-        horizontalAlignment = Alignment.CenterHorizontally
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .background(
+                color = Color.White.copy(alpha = if (enabled) 0.55f else 0.24f),
+                shape = RoundedCornerShape(999.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = Color.Black.copy(alpha = 0.07f),
+                shape = RoundedCornerShape(999.dp)
+            )
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.size(24.dp)) {
             drawActionIcon(
@@ -711,12 +893,6 @@ private fun DrawIconAction(
                 color = if (enabled) Color(0xFF3A424A) else Color(0xFF9AA1A9)
             )
         }
-
-        Text(
-            text = text,
-            color = if (enabled) Color(0xFF4F5963) else Color(0xFF9AA1A9),
-            style = MaterialTheme.typography.labelSmall
-        )
     }
 }
 
@@ -784,6 +960,94 @@ private fun ColorSwatch(
 }
 
 @Composable
+private fun StrokeSizeSelector(
+    selectedStrokeWidth: Float,
+    onStrokeWidthChange: (Float) -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        STROKE_WIDTHS.forEach { width ->
+            val selected = width == selectedStrokeWidth
+            val lineColor = if (selected) CarrotColors.Accent else Color(0xFF55606A)
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .background(
+                        color = if (selected) CarrotColors.Accent.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.45f),
+                        shape = CircleShape
+                    )
+                    .border(
+                        width = if (selected) 1.dp else 0.dp,
+                        color = if (selected) CarrotColors.Accent else Color.Transparent,
+                        shape = CircleShape
+                    )
+                    .clickable { onStrokeWidthChange(width) },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.size(16.dp)) {
+                    drawLine(
+                        color = lineColor,
+                        start = Offset(2.dp.toPx(), size.height / 2f),
+                        end = Offset(size.width - 2.dp.toPx(), size.height / 2f),
+                        strokeWidth = (width / 12f).coerceIn(1.6f, 4.6f),
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceDragHandle(
+    isExpanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(width = 52.dp, height = 18.dp)
+            .pointerInput(isExpanded) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var totalDragY = 0f
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressedChanges = event.changes.filter { change -> change.pressed }
+
+                        if (pressedChanges.isEmpty()) {
+                            if (abs(totalDragY) < WORKSPACE_HANDLE_TAP_SLOP_PX) {
+                                onExpandedChange(!isExpanded)
+                            } else {
+                                onExpandedChange(totalDragY < 0f)
+                            }
+                            break
+                        }
+
+                        pressedChanges.forEach { change ->
+                            totalDragY += change.positionChange().y
+                            change.consume()
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 42.dp, height = 4.dp)
+                .background(
+                    color = Color.Black.copy(alpha = if (isExpanded) 0.36f else 0.28f),
+                    shape = RoundedCornerShape(999.dp)
+                )
+        )
+    }
+}
+
+@Composable
 private fun WorkspaceCollapseButton(
     onClick: () -> Unit
 ) {
@@ -814,90 +1078,67 @@ private fun WorkspaceCollapseButton(
 }
 
 @Composable
-private fun WorkspaceTabLabel(
-    text: String,
+private fun WorkspaceModeButton(
+    mode: WorkspaceMode,
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    val iconColor = if (selected) CarrotColors.Accent else Color(0xFF2D343B)
+    val underlineColor = if (selected) CarrotColors.Accent else Color.Transparent
+
     Column(
         modifier = Modifier.clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = text,
-            color = if (selected) CarrotColors.Accent else Color(0xFF2D343B),
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-        )
+        Canvas(modifier = Modifier.size(24.dp)) {
+            drawWorkspaceModeIcon(
+                mode = mode,
+                color = iconColor
+            )
+        }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(5.dp))
 
         Box(
             modifier = Modifier
-                .size(width = 42.dp, height = 2.dp)
+                .size(width = 30.dp, height = 2.dp)
                 .background(
-                    color = if (selected) CarrotColors.Accent else Color.Transparent,
+                    color = underlineColor,
                     shape = RoundedCornerShape(999.dp)
                 )
         )
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawWorkspaceGrid(
-    canvasOffset: Offset,
-    canvasScale: Float
+@Composable
+private fun DrawTargetButton(
+    target: DrawTarget,
+    selected: Boolean,
+    onClick: () -> Unit
 ) {
-    val gridColor = Color(0x22000000)
-    val majorGridColor = Color(0x33000000)
-    val gridStep = 180f * canvasScale
-    val majorGridStep = gridStep * 4f
+    val iconColor = if (selected) CarrotColors.Accent else Color(0xFF3A424A)
 
-    if (gridStep <= 2f) {
-        return
-    }
-
-    var x = canvasOffset.x % gridStep
-    while (x < size.width) {
-        drawLine(
-            color = gridColor,
-            start = Offset(x, 0f),
-            end = Offset(x, size.height),
-            strokeWidth = 1f
-        )
-        x += gridStep
-    }
-
-    var y = canvasOffset.y % gridStep
-    while (y < size.height) {
-        drawLine(
-            color = gridColor,
-            start = Offset(0f, y),
-            end = Offset(size.width, y),
-            strokeWidth = 1f
-        )
-        y += gridStep
-    }
-
-    x = canvasOffset.x % majorGridStep
-    while (x < size.width) {
-        drawLine(
-            color = majorGridColor,
-            start = Offset(x, 0f),
-            end = Offset(x, size.height),
-            strokeWidth = 1.5f
-        )
-        x += majorGridStep
-    }
-
-    y = canvasOffset.y % majorGridStep
-    while (y < size.height) {
-        drawLine(
-            color = majorGridColor,
-            start = Offset(0f, y),
-            end = Offset(size.width, y),
-            strokeWidth = 1.5f
-        )
-        y += majorGridStep
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .background(
+                color = if (selected) CarrotColors.Accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.42f),
+                shape = RoundedCornerShape(999.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) CarrotColors.Accent else Color.Black.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(999.dp)
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.size(20.dp)) {
+            drawDrawTargetIcon(
+                target = target,
+                color = iconColor
+            )
+        }
     }
 }
 
@@ -925,20 +1166,15 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawInkStroke(
         return
     }
 
-    val path = Path().apply {
-        val first = points.first()
-        moveTo(
-            x = first.x * canvasScale + canvasOffset.x,
-            y = first.y * canvasScale + canvasOffset.y
-        )
-
-        points.drop(1).forEach { point ->
-            lineTo(
+    val path = smoothedInkPath(
+        points = points,
+        transform = { point ->
+            Offset(
                 x = point.x * canvasScale + canvasOffset.x,
                 y = point.y * canvasScale + canvasOffset.y
             )
         }
-    }
+    )
 
     drawPath(
         path = path,
@@ -959,14 +1195,105 @@ private fun List<CanvasInkStroke>.eraseCanvasStrokes(
     }
 
     return filterNot { stroke ->
-        stroke.points.any { point ->
-            erasePoints.any { eraser ->
-                val dx = point.x - eraser.x
-                val dy = point.y - eraser.y
-                dx * dx + dy * dy <= CANVAS_ERASER_RADIUS * CANVAS_ERASER_RADIUS
-            }
+        stroke.points.isNearInkPath(
+            testPoints = erasePoints,
+            radius = CANVAS_ERASER_RADIUS
+        )
+    }
+}
+
+private fun List<InkPoint>.appendInkPointIfFarEnough(
+    point: InkPoint,
+    minDistance: Float
+): List<InkPoint> {
+    val lastPoint = lastOrNull() ?: return this + point
+    val dx = point.x - lastPoint.x
+    val dy = point.y - lastPoint.y
+
+    return if (dx * dx + dy * dy >= minDistance * minDistance) {
+        this + point
+    } else {
+        this
+    }
+}
+
+private fun List<InkPoint>.isNearInkPath(
+    testPoints: List<InkPoint>,
+    radius: Float
+): Boolean {
+    if (isEmpty() || testPoints.isEmpty()) {
+        return false
+    }
+
+    val radiusSquared = radius * radius
+
+    return testPoints.any { testPoint ->
+        any { point ->
+            point.distanceSquaredTo(testPoint) <= radiusSquared
+        } || zipWithNext().any { (start, end) ->
+            testPoint.distanceSquaredToSegment(start, end) <= radiusSquared
         }
     }
+}
+
+private fun smoothedInkPath(
+    points: List<InkPoint>,
+    transform: (InkPoint) -> Offset
+): Path {
+    val transformed = points.map(transform)
+
+    return Path().apply {
+        val first = transformed.first()
+        moveTo(first.x, first.y)
+
+        if (transformed.size == 2) {
+            val last = transformed.last()
+            lineTo(last.x, last.y)
+            return@apply
+        }
+
+        for (index in 1 until transformed.lastIndex) {
+            val current = transformed[index]
+            val next = transformed[index + 1]
+            val mid = Offset(
+                x = (current.x + next.x) / 2f,
+                y = (current.y + next.y) / 2f
+            )
+            quadraticTo(current.x, current.y, mid.x, mid.y)
+        }
+
+        val last = transformed.last()
+        lineTo(last.x, last.y)
+    }
+}
+
+private fun InkPoint.distanceSquaredTo(other: InkPoint): Float {
+    val dx = x - other.x
+    val dy = y - other.y
+
+    return dx * dx + dy * dy
+}
+
+private fun InkPoint.distanceSquaredToSegment(
+    start: InkPoint,
+    end: InkPoint
+): Float {
+    val dx = end.x - start.x
+    val dy = end.y - start.y
+    val lengthSquared = dx * dx + dy * dy
+
+    if (lengthSquared <= 0.000001f) {
+        return distanceSquaredTo(start)
+    }
+
+    val t = (((x - start.x) * dx + (y - start.y) * dy) / lengthSquared)
+        .coerceIn(0f, 1f)
+    val projection = InkPoint(
+        x = start.x + t * dx,
+        y = start.y + t * dy
+    )
+
+    return distanceSquaredTo(projection)
 }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawToolIcon(
@@ -1013,7 +1340,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawToolIcon(
             drawRoundRect(
                 color = color,
                 topLeft = Offset(6.dp.toPx(), 6.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(12.dp.toPx(), 9.dp.toPx()),
+                size = Size(12.dp.toPx(), 9.dp.toPx()),
                 style = Stroke(width = stroke),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
             )
@@ -1024,6 +1351,63 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawToolIcon(
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawWorkspaceModeIcon(
+    mode: WorkspaceMode,
+    color: Color
+) {
+    val stroke = 1.8.dp.toPx()
+
+    when (mode) {
+        WorkspaceMode.Notes -> {
+            drawLine(color, Offset(5.dp.toPx(), 7.dp.toPx()), Offset(17.dp.toPx(), 7.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(5.dp.toPx(), 12.dp.toPx()), Offset(17.dp.toPx(), 12.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(5.dp.toPx(), 17.dp.toPx()), Offset(13.dp.toPx(), 17.dp.toPx()), stroke, StrokeCap.Round)
+        }
+
+        WorkspaceMode.Draw -> {
+            drawLine(color, Offset(5.dp.toPx(), 17.dp.toPx()), Offset(16.dp.toPx(), 6.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(14.dp.toPx(), 4.dp.toPx()), Offset(19.dp.toPx(), 9.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(4.dp.toPx(), 18.dp.toPx()), Offset(10.dp.toPx(), 17.dp.toPx()), stroke, StrokeCap.Round)
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDrawTargetIcon(
+    target: DrawTarget,
+    color: Color
+) {
+    val stroke = 1.7.dp.toPx()
+
+    when (target) {
+        DrawTarget.Canvas -> {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
+                size = Size(12.dp.toPx(), 12.dp.toPx()),
+                style = Stroke(width = stroke),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+            )
+            drawLine(color, Offset(8.dp.toPx(), 4.dp.toPx()), Offset(8.dp.toPx(), 16.dp.toPx()), strokeWidth = 0.9.dp.toPx())
+            drawLine(color, Offset(12.dp.toPx(), 4.dp.toPx()), Offset(12.dp.toPx(), 16.dp.toPx()), strokeWidth = 0.9.dp.toPx())
+            drawLine(color, Offset(4.dp.toPx(), 8.dp.toPx()), Offset(16.dp.toPx(), 8.dp.toPx()), strokeWidth = 0.9.dp.toPx())
+            drawLine(color, Offset(4.dp.toPx(), 12.dp.toPx()), Offset(16.dp.toPx(), 12.dp.toPx()), strokeWidth = 0.9.dp.toPx())
+        }
+
+        DrawTarget.Pdf -> {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(5.dp.toPx(), 3.dp.toPx()),
+                size = Size(10.dp.toPx(), 14.dp.toPx()),
+                style = Stroke(width = stroke),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx())
+            )
+            drawLine(color, Offset(8.dp.toPx(), 8.dp.toPx()), Offset(13.dp.toPx(), 8.dp.toPx()), strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(color, Offset(8.dp.toPx(), 11.dp.toPx()), Offset(13.dp.toPx(), 11.dp.toPx()), strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(color, Offset(8.dp.toPx(), 14.dp.toPx()), Offset(11.dp.toPx(), 14.dp.toPx()), strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
         }
     }
 }
@@ -1042,7 +1426,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawActionIcon(
                 sweepAngle = 245f,
                 useCenter = false,
                 topLeft = Offset(5.dp.toPx(), 5.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(13.dp.toPx(), 13.dp.toPx()),
+                size = Size(13.dp.toPx(), 13.dp.toPx()),
                 style = Stroke(width = stroke, cap = StrokeCap.Round)
             )
             drawLine(color, Offset(5.dp.toPx(), 11.dp.toPx()), Offset(3.dp.toPx(), 7.dp.toPx()), stroke, StrokeCap.Round)
@@ -1098,18 +1482,23 @@ private enum class DrawActionIcon {
 }
 
 private val DRAW_COLORS = listOf(
-    0xFFFF7A1AL,
-    0xFFE82929L,
-    0xFFFFD83DL,
-    0xFF1DB954L,
-    0xFF3677F5L,
-    0xFF111111L
+    0xFFFF8A3DL,
+    0xFFFF6B78L,
+    0xFFFFD966L,
+    0xFF65D58AL,
+    0xFF6EA1FFL,
+    0xFFB58CFFL,
+    0xFF202329L
 )
+
+private val STROKE_WIDTHS = listOf(22f, 34f, 48f)
 
 private const val DRAW_CANVAS_WIDTH = 5000f
 private const val DRAW_CANVAS_HEIGHT = 7000f
 private const val INITIAL_CANVAS_SCALE = 0.22f
 private const val MIN_CANVAS_SCALE = 0.08f
 private const val MAX_CANVAS_SCALE = 0.9f
-private const val DEFAULT_CANVAS_STROKE_WIDTH = 34f
+private const val MIN_CANVAS_INK_POINT_DISTANCE = 4f
+private const val CANVAS_ERASER_SAMPLE_DISTANCE = 24f
 private const val CANVAS_ERASER_RADIUS = 120f
+private const val WORKSPACE_HANDLE_TAP_SLOP_PX = 18f
