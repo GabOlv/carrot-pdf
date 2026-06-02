@@ -191,7 +191,7 @@ fun FloatingAnnotationButton(
 }
 
 @Composable
-fun FloatingPrintButton(
+fun FloatingScreenshotButton(
     onClick: () -> Unit
 ) {
     Box(
@@ -215,34 +215,32 @@ fun FloatingPrintButton(
     ) {
         Canvas(modifier = Modifier.size(25.dp)) {
             val icon = Color.White.copy(alpha = 0.92f)
-            val accent = Color(0xFFFF7A1A)
             val stroke = 2.dp.toPx()
 
             drawRoundRect(
                 color = icon,
-                topLeft = Offset(7.dp.toPx(), 3.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(11.dp.toPx(), 7.dp.toPx()),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.2.dp.toPx()),
+                topLeft = Offset(5.dp.toPx(), 6.dp.toPx()),
+                size = androidx.compose.ui.geometry.Size(15.dp.toPx(), 13.dp.toPx()),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.5.dp.toPx()),
                 style = Stroke(width = stroke)
             )
             drawRoundRect(
                 color = icon,
-                topLeft = Offset(4.dp.toPx(), 9.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(17.dp.toPx(), 9.dp.toPx()),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
-                style = Stroke(width = stroke)
-            )
-            drawRoundRect(
-                color = icon,
-                topLeft = Offset(7.dp.toPx(), 15.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(11.dp.toPx(), 7.dp.toPx()),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.2.dp.toPx()),
+                topLeft = Offset(8.dp.toPx(), 3.dp.toPx()),
+                size = androidx.compose.ui.geometry.Size(9.dp.toPx(), 5.dp.toPx()),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.8.dp.toPx()),
                 style = Stroke(width = stroke)
             )
             drawCircle(
-                color = accent,
-                radius = 1.3.dp.toPx(),
-                center = Offset(18.dp.toPx(), 12.dp.toPx())
+                color = icon,
+                radius = 3.1.dp.toPx(),
+                center = Offset(12.5.dp.toPx(), 12.5.dp.toPx()),
+                style = Stroke(width = stroke)
+            )
+            drawCircle(
+                color = Color(0xFFFF7A1A),
+                radius = 1.1.dp.toPx(),
+                center = Offset(18.dp.toPx(), 8.dp.toPx())
             )
         }
     }

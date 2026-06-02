@@ -88,6 +88,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.drawToBitmap
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
@@ -107,6 +108,7 @@ import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
 import com.example.carrotpdf.pdf.getPdfPageSizes
 import com.example.carrotpdf.pdf.printPdf
+import com.example.carrotpdf.pdf.saveScreenshot
 import com.example.carrotpdf.pdf.sharePdf
 import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.EmptyState
@@ -143,6 +145,7 @@ private fun CarrotPdfContent(
     externalOpenRequestId: Int
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val activity = remember(context) { context.findActivity() }
     val coroutineScope = rememberCoroutineScope()
     val statusBarTop = WindowInsets.statusBars
@@ -867,12 +870,35 @@ private fun CarrotPdfContent(
                         bottom = navigationBarBottom + 18.dp
                     )
             ) {
-                FloatingPrintButton(
+                FloatingScreenshotButton(
                     onClick = {
                         val tab = activeTab
 
                         if (tab != null) {
-                            printPdf(context, tab.uri, tab.title)
+                            coroutineScope.launch {
+                                isChromeVisible = false
+                                isOverflowOpen = false
+                                isTabSwitcherOpen = false
+                                selectedExternalLink = null
+                                delay(SCREENSHOT_CAPTURE_DELAY_MS)
+
+                                val bitmap = runCatching {
+                                    view.drawToBitmap()
+                                }.getOrNull()
+                                val saved = bitmap != null && withContext(Dispatchers.IO) {
+                                    saveScreenshot(
+                                        context = context.applicationContext,
+                                        bitmap = bitmap,
+                                        title = tab.title
+                                    )
+                                }
+
+                                Toast.makeText(
+                                    context,
+                                    if (saved) "Screenshot saved" else "Could not save screenshot",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
                     }
                 )
@@ -1177,4 +1203,5 @@ const val EDGE_REVEAL_DISTANCE_PX = 18f
 const val PAGE_INDICATOR_VISIBLE_MS = 1200L
 const val TAB_REORDER_HOLD_MS = 180L
 const val DOCUMENT_LOAD_TIMEOUT_MS = 12_000L
+const val SCREENSHOT_CAPTURE_DELAY_MS = 120L
 

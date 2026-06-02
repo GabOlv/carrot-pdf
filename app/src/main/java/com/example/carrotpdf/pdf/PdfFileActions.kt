@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.CancellationSignal
@@ -17,6 +18,8 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.getSystemService
 import java.io.FileOutputStream
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 fun sharePdf(
     context: Context,
@@ -87,6 +90,53 @@ fun downloadPdf(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.IS_PENDING, 0)
+            }
+            resolver.update(outputUri, values, null, null)
+        }
+
+        true
+    }.getOrDefault(false)
+}
+
+fun saveScreenshot(
+    context: Context,
+    bitmap: Bitmap,
+    title: String
+): Boolean {
+    if (bitmap.isRecycled) {
+        return false
+    }
+
+    return runCatching {
+        val resolver = context.contentResolver
+        val fileName = "${title.safeImageFileStem()}-${screenshotTimestamp()}.png"
+        val outputUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CarrotPDF")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+
+            resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return false
+        } else {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            }
+
+            resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return false
+        }
+
+        resolver.openOutputStream(outputUri)?.use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        } ?: return false
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.IS_PENDING, 0)
             }
             resolver.update(outputUri, values, null, null)
         }
@@ -176,4 +226,18 @@ private fun String.ensurePdfFileName(): String {
     } else {
         "$this.pdf"
     }
+}
+
+private fun String.safeImageFileStem(): String {
+    return substringBeforeLast(".")
+        .replace(Regex("[^A-Za-z0-9._-]+"), "-")
+        .trim('-', '.', '_')
+        .take(48)
+        .ifBlank { "carrot-pdf" }
+}
+
+private fun screenshotTimestamp(): String {
+    return LocalDateTime.now().format(
+        DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+    )
 }
