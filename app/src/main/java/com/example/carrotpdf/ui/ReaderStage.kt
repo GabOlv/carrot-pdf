@@ -123,6 +123,7 @@ fun ReaderStage(
     activeSearchResultIndex: Int,
     linkRegions: List<PdfLinkRegion>,
     selectedTextSelection: PdfTextSelection?,
+    suppressPageOverlays: Boolean,
     pageSizes: List<PdfPageSize>,
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
@@ -183,6 +184,7 @@ fun ReaderStage(
                     activeSearchResultIndex = activeSearchResultIndex,
                     linkRegions = linkRegions,
                     selectedTextSelection = selectedTextSelection,
+                    suppressPageOverlays = suppressPageOverlays,
                     pageSizes = pageSizes,
                     onLinkTap = onLinkTap,
                     onTextLongPress = onTextLongPress,

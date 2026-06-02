@@ -87,6 +87,7 @@ fun ContinuousPdfViewer(
     activeSearchResultIndex: Int = -1,
     linkRegions: List<PdfLinkRegion> = emptyList(),
     selectedTextSelection: PdfTextSelection? = null,
+    suppressPageOverlays: Boolean = false,
     pageSizes: List<PdfPageSize> = emptyList(),
     onLinkTap: (PdfLinkRegion) -> Unit = {},
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit = { _, _, _ -> },
@@ -461,6 +462,7 @@ fun ContinuousPdfViewer(
                                 linkRegions = linkRegions.linkRegionsForPage(pageIndex),
                                 selectedTextSelection = selectedTextSelection
                                     ?.takeIf { selection -> selection.hasSelectionOnPage(pageIndex) },
+                                suppressPageOverlays = suppressPageOverlays,
                                 onLinkTap = onLinkTap,
                                 onTextLongPress = onTextLongPress,
                                 onTextSelectionHandleDrag = onTextSelectionHandleDrag,
@@ -506,6 +508,7 @@ private fun PdfPageItem(
     activeSearchResult: PdfSearchResult?,
     linkRegions: List<PdfLinkRegion>,
     selectedTextSelection: PdfTextSelection?,
+    suppressPageOverlays: Boolean,
     onLinkTap: (PdfLinkRegion) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
     onTextSelectionHandleDrag: (
@@ -604,27 +607,29 @@ private fun PdfPageItem(
                         contentScale = ContentScale.FillBounds
                     )
 
-                    SearchHighlightOverlay(
-                        results = searchResults,
-                        activeSearchResult = activeSearchResult,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (!suppressPageOverlays) {
+                        SearchHighlightOverlay(
+                            results = searchResults,
+                            activeSearchResult = activeSearchResult,
+                            modifier = Modifier.fillMaxSize()
+                        )
 
-                    TextSelectionOverlay(
-                        pageIndex = pageIndex,
-                        selection = selectedTextSelection,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        TextSelectionOverlay(
+                            pageIndex = pageIndex,
+                            selection = selectedTextSelection,
+                            modifier = Modifier.fillMaxSize()
+                        )
 
-                    PdfPageInteractionOverlay(
-                        pageIndex = pageIndex,
-                        linkRegions = linkRegions,
-                        selectedTextSelection = selectedTextSelection,
-                        onLinkTap = onLinkTap,
-                        onTextLongPress = onTextLongPress,
-                        onTextSelectionHandleDrag = onTextSelectionHandleDrag,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        PdfPageInteractionOverlay(
+                            pageIndex = pageIndex,
+                            linkRegions = linkRegions,
+                            selectedTextSelection = selectedTextSelection,
+                            onLinkTap = onLinkTap,
+                            onTextLongPress = onTextLongPress,
+                            onTextSelectionHandleDrag = onTextSelectionHandleDrag,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
 

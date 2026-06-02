@@ -590,6 +590,7 @@ private fun CarrotPdfContent(
                 activeSearchResultIndex = activeSearchResultIndex,
                 linkRegions = linkRegions,
                 selectedTextSelection = selectedTextSelection,
+                suppressPageOverlays = isCapturingScreenshot,
                 pageSizes = activeTab?.pageSizes.orEmpty(),
                 pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                     DrivePageIndicator(
@@ -742,89 +743,88 @@ private fun CarrotPdfContent(
                 }
             )
 
-            AnimatedVisibility(
-                visible = isChromeVisible &&
-                    !isSearchVisible &&
-                    selectedTextSelection == null &&
-                    !isCapturingScreenshot,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.TopCenter)
-            ) {
-                ReaderTopBar(
-                    title = activeTab?.title ?: "Carrot PDF",
-                    tabCount = tabs.size,
-                    onBack = {
-                        activity?.finish()
-                    },
-                    onSearch = {
-                        if (activeTab != null) {
-                            selectedTextSelection = null
-                            selectedExternalLink = null
-                            isSearchVisible = true
-                            isChromeVisible = true
+            if (!isCapturingScreenshot) {
+                AnimatedVisibility(
+                    visible = isChromeVisible && !isSearchVisible && selectedTextSelection == null,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    ReaderTopBar(
+                        title = activeTab?.title ?: "Carrot PDF",
+                        tabCount = tabs.size,
+                        onBack = {
+                            activity?.finish()
+                        },
+                        onSearch = {
+                            if (activeTab != null) {
+                                selectedTextSelection = null
+                                selectedExternalLink = null
+                                isSearchVisible = true
+                                isChromeVisible = true
+                            }
+                        },
+                        onTabs = {
+                            isTabSwitcherOpen = true
+                        },
+                        onMenu = {
+                            isOverflowOpen = true
                         }
-                    },
-                    onTabs = {
-                        isTabSwitcherOpen = true
-                    },
-                    onMenu = {
-                        isOverflowOpen = true
-                    }
-                )
+                    )
+                }
             }
 
-            AnimatedVisibility(
-                visible = isSearchVisible &&
-                    selectedTextSelection == null &&
-                    !isCapturingScreenshot,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(
-                        start = 10.dp,
-                        top = statusBarTop + 8.dp,
-                        end = 10.dp,
-                        bottom = 8.dp
+            if (!isCapturingScreenshot) {
+                AnimatedVisibility(
+                    visible = isSearchVisible && selectedTextSelection == null,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(
+                            start = 10.dp,
+                            top = statusBarTop + 8.dp,
+                            end = 10.dp,
+                            bottom = 8.dp
+                        )
+                ) {
+                    ReaderSearchOverlay(
+                        query = searchQuery,
+                        isSearching = isSearching,
+                        resultCount = searchResults.size,
+                        activeResultIndex = activeSearchResultIndex,
+                        onQueryChange = { query ->
+                            searchQuery = query
+                        },
+                        onClose = ::closeSearch,
+                        onPrevious = {
+                            if (searchResults.isNotEmpty()) {
+                                activeSearchResultIndex = if (activeSearchResultIndex <= 0) {
+                                    searchResults.lastIndex
+                                } else {
+                                    activeSearchResultIndex - 1
+                                }
+
+                                searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
+                                    activeViewerState?.requestScrollToSearchResult(result)
+                                }
+                            }
+                        },
+                        onNext = {
+                            if (searchResults.isNotEmpty()) {
+                                activeSearchResultIndex = if (activeSearchResultIndex >= searchResults.lastIndex) {
+                                    0
+                                } else {
+                                    activeSearchResultIndex + 1
+                                }
+
+                                searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
+                                    activeViewerState?.requestScrollToSearchResult(result)
+                                }
+                            }
+                        }
                     )
-            ) {
-                ReaderSearchOverlay(
-                    query = searchQuery,
-                    isSearching = isSearching,
-                    resultCount = searchResults.size,
-                    activeResultIndex = activeSearchResultIndex,
-                    onQueryChange = { query ->
-                        searchQuery = query
-                    },
-                    onClose = ::closeSearch,
-                    onPrevious = {
-                        if (searchResults.isNotEmpty()) {
-                            activeSearchResultIndex = if (activeSearchResultIndex <= 0) {
-                                searchResults.lastIndex
-                            } else {
-                                activeSearchResultIndex - 1
-                            }
-
-                            searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
-                                activeViewerState?.requestScrollToSearchResult(result)
-                            }
-                        }
-                    },
-                    onNext = {
-                        if (searchResults.isNotEmpty()) {
-                            activeSearchResultIndex = if (activeSearchResultIndex >= searchResults.lastIndex) {
-                                0
-                            } else {
-                                activeSearchResultIndex + 1
-                            }
-
-                            searchResults.getOrNull(activeSearchResultIndex)?.let { result ->
-                                activeViewerState?.requestScrollToSearchResult(result)
-                            }
-                        }
-                    }
-                )
+                }
             }
 
             selectedTextSelection?.let { selection ->
@@ -852,87 +852,100 @@ private fun CarrotPdfContent(
                 }
             }
 
-            AnimatedVisibility(
-                visible = (isChromeVisible || isSearchVisible) &&
-                    activeTab != null &&
-                    selectedTextSelection == null &&
-                    !isCapturingScreenshot,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = 18.dp,
-                        bottom = navigationBarBottom + 18.dp
+            if (!isCapturingScreenshot) {
+                AnimatedVisibility(
+                    visible = (isChromeVisible || isSearchVisible) &&
+                        activeTab != null &&
+                        selectedTextSelection == null,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            end = 18.dp,
+                            bottom = navigationBarBottom + 18.dp
+                        )
+                ) {
+                    FloatingAnnotationButton(
+                        onClick = {
+                            Toast.makeText(
+                                context,
+                                "Annotations will come later.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     )
-            ) {
-                FloatingAnnotationButton(
-                    onClick = {
-                        Toast.makeText(
-                            context,
-                            "Annotations will come later.",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                )
+                }
             }
 
-            AnimatedVisibility(
-                visible = (isChromeVisible || isSearchVisible) &&
-                    activeTab != null &&
-                    selectedTextSelection == null &&
-                    !isCapturingScreenshot,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(
-                        start = 24.dp,
-                        bottom = navigationBarBottom + 18.dp
-                    )
-            ) {
-                FloatingScreenshotButton(
-                    onClick = {
-                        val tab = activeTab
+            if (!isCapturingScreenshot) {
+                AnimatedVisibility(
+                    visible = (isChromeVisible || isSearchVisible) &&
+                        activeTab != null &&
+                        selectedTextSelection == null,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(
+                            start = 24.dp,
+                            bottom = navigationBarBottom + 18.dp
+                        )
+                ) {
+                    FloatingScreenshotButton(
+                        onClick = {
+                            val tab = activeTab
 
-                        if (tab != null) {
-                            coroutineScope.launch {
-                                isCapturingScreenshot = true
-                                isChromeVisible = false
-                                isOverflowOpen = false
-                                isTabSwitcherOpen = false
-                                selectedExternalLink = null
-                                delay(SCREENSHOT_CAPTURE_DELAY_MS)
+                            if (tab != null) {
+                                coroutineScope.launch {
+                                    val paperBounds = currentPaperBoundsInWindow
 
-                                val bitmap = runCatching {
-                                    view.drawToBitmap()
-                                }.getOrNull()
-                                val croppedBitmap = bitmap?.let { source ->
-                                    cropBitmapToWindowBounds(
-                                        source = source,
-                                        view = view,
-                                        boundsInWindow = currentPaperBoundsInWindow
-                                    )
+                                    if (paperBounds == null) {
+                                        Toast.makeText(
+                                            context,
+                                            "Could not capture page.",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        return@launch
+                                    }
+
+                                    isCapturingScreenshot = true
+                                    isChromeVisible = false
+                                    isOverflowOpen = false
+                                    isTabSwitcherOpen = false
+                                    selectedExternalLink = null
+                                    delay(SCREENSHOT_CAPTURE_DELAY_MS)
+
+                                    val bitmap = runCatching {
+                                        view.drawToBitmap()
+                                    }.getOrNull()
+                                    val croppedBitmap = bitmap?.let { source ->
+                                        cropBitmapToWindowBounds(
+                                            source = source,
+                                            view = view,
+                                            boundsInWindow = paperBounds
+                                        )
+                                    }
+                                    val saved = croppedBitmap != null && withContext(Dispatchers.IO) {
+                                        saveScreenshot(
+                                            context = context.applicationContext,
+                                            bitmap = croppedBitmap,
+                                            title = tab.title
+                                        )
+                                    }
+
+                                    isCapturingScreenshot = false
+
+                                    Toast.makeText(
+                                        context,
+                                        if (saved) "Screenshot saved" else "Could not save screenshot",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
-                                val saved = croppedBitmap != null && withContext(Dispatchers.IO) {
-                                    saveScreenshot(
-                                        context = context.applicationContext,
-                                        bitmap = croppedBitmap,
-                                        title = tab.title
-                                    )
-                                }
-
-                                isCapturingScreenshot = false
-
-                                Toast.makeText(
-                                    context,
-                                    if (saved) "Screenshot saved" else "Could not save screenshot",
-                                    Toast.LENGTH_SHORT
-                                ).show()
                             }
                         }
-                    }
-                )
+                    )
+                }
             }
 
             if (isCreatingImagePdf) {
@@ -1157,7 +1170,7 @@ private fun cropBitmapToWindowBounds(
     boundsInWindow: Rect?
 ): Bitmap? {
     if (boundsInWindow == null || source.width <= 0 || source.height <= 0) {
-        return source
+        return null
     }
 
     val viewLocation = IntArray(2)
@@ -1171,7 +1184,7 @@ private fun cropBitmapToWindowBounds(
     val height = max(0, bottom - top)
 
     if (width <= 1 || height <= 1) {
-        return source
+        return null
     }
 
     val croppedWidth = min(width, source.width - left)
