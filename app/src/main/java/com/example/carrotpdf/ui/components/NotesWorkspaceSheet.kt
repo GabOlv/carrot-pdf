@@ -4,7 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
@@ -253,20 +256,6 @@ private fun FreeDrawCanvas(
                 if (strokes.isNotEmpty()) {
                     onStrokesChange(emptyList())
                 }
-            },
-            onZoomOut = {
-                canvasScale = (canvasScale * 0.82f).coerceIn(
-                    MIN_CANVAS_SCALE,
-                    MAX_CANVAS_SCALE
-                )
-                canvasOffset = clampOffset(canvasOffset, canvasScale)
-            },
-            onZoomIn = {
-                canvasScale = (canvasScale * 1.18f).coerceIn(
-                    MIN_CANVAS_SCALE,
-                    MAX_CANVAS_SCALE
-                )
-                canvasOffset = clampOffset(canvasOffset, canvasScale)
             }
         )
 
@@ -291,47 +280,104 @@ private fun FreeDrawCanvas(
                     canvasOffset = clampOffset(canvasOffset, canvasScale)
                 }
                 .pointerInput(interactionMode) {
-                    detectDragGestures(
-                        onDragStart = { position ->
-                            if (interactionMode == CanvasInteractionMode.Draw) {
-                                currentStrokePoints = listOf(screenToCanvas(position))
-                            }
-                        },
-                        onDragEnd = {
-                            if (
-                                interactionMode == CanvasInteractionMode.Draw &&
-                                currentStrokePoints.size > 1
-                            ) {
-                                latestOnStrokesChange(
-                                    latestStrokes + CanvasInkStroke(
-                                        id = UUID.randomUUID().toString(),
-                                        tool = InkTool.Pen,
-                                        color = latestSelectedColor,
-                                        width = DEFAULT_CANVAS_STROKE_WIDTH,
-                                        points = currentStrokePoints
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        var gestureStrokePoints = if (interactionMode == CanvasInteractionMode.Draw) {
+                            listOf(screenToCanvas(down.position))
+                        } else {
+                            emptyList()
+                        }
+                        var isTransforming = false
+                        var lastCentroid: Offset? = null
+                        var lastDistance = 0f
+
+                        currentStrokePoints = gestureStrokePoints
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pressedChanges = event.changes.filter { change -> change.pressed }
+
+                            if (pressedChanges.isEmpty()) {
+                                if (
+                                    !isTransforming &&
+                                    interactionMode == CanvasInteractionMode.Draw &&
+                                    gestureStrokePoints.size > 1
+                                ) {
+                                    latestOnStrokesChange(
+                                        latestStrokes + CanvasInkStroke(
+                                            id = UUID.randomUUID().toString(),
+                                            tool = InkTool.Pen,
+                                            color = latestSelectedColor,
+                                            width = DEFAULT_CANVAS_STROKE_WIDTH,
+                                            points = gestureStrokePoints
+                                        )
                                     )
-                                )
+                                }
+
+                                currentStrokePoints = emptyList()
+                                break
                             }
 
-                            currentStrokePoints = emptyList()
-                        },
-                        onDragCancel = {
-                            currentStrokePoints = emptyList()
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
+                            if (pressedChanges.size >= 2) {
+                                isTransforming = true
+                                gestureStrokePoints = emptyList()
+                                currentStrokePoints = emptyList()
 
-                            if (interactionMode == CanvasInteractionMode.Move) {
-                                canvasOffset = clampOffset(
-                                    canvasOffset + dragAmount,
-                                    canvasScale
+                                val centroid = centroidOf(pressedChanges)
+                                val distance = averageDistanceFromCentroid(
+                                    changes = pressedChanges,
+                                    centroid = centroid
                                 )
+                                val previousCentroid = lastCentroid
+
+                                if (previousCentroid != null) {
+                                    val pan = centroid - previousCentroid
+                                    val oldScale = canvasScale
+                                    val zoomChange = if (lastDistance > 0f && distance > 0f) {
+                                        distance / lastDistance
+                                    } else {
+                                        1f
+                                    }
+                                    val newScale = (oldScale * zoomChange).coerceIn(
+                                        MIN_CANVAS_SCALE,
+                                        MAX_CANVAS_SCALE
+                                    )
+                                    val contentX = (centroid.x - canvasOffset.x) / oldScale
+                                    val contentY = (centroid.y - canvasOffset.y) / oldScale
+
+                                    canvasScale = newScale
+                                    canvasOffset = clampOffset(
+                                        Offset(
+                                            x = centroid.x - (contentX * newScale) + pan.x,
+                                            y = centroid.y - (contentY * newScale) + pan.y
+                                        ),
+                                        newScale
+                                    )
+                                }
+
+                                lastCentroid = centroid
+                                lastDistance = distance
+                                pressedChanges.forEach { change -> change.consume() }
                             } else {
-                                currentStrokePoints = currentStrokePoints +
-                                    screenToCanvas(change.position)
+                                val change = pressedChanges.first()
+                                lastCentroid = null
+                                lastDistance = 0f
+
+                                if (isTransforming || interactionMode == CanvasInteractionMode.Move) {
+                                    canvasOffset = clampOffset(
+                                        canvasOffset + change.positionChange(),
+                                        canvasScale
+                                    )
+                                } else {
+                                    gestureStrokePoints = gestureStrokePoints +
+                                        screenToCanvas(change.position)
+                                    currentStrokePoints = gestureStrokePoints
+                                }
+
+                                change.consume()
                             }
                         }
-                    )
+                    }
                 }
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {
@@ -343,7 +389,7 @@ private fun FreeDrawCanvas(
                 strokes.forEach { stroke ->
                     drawInkStroke(
                         points = stroke.points,
-                        color = Color(stroke.color.toULong()),
+                        color = argbColor(stroke.color),
                         width = stroke.width,
                         canvasOffset = canvasOffset,
                         canvasScale = canvasScale
@@ -353,7 +399,7 @@ private fun FreeDrawCanvas(
                 if (currentStrokePoints.isNotEmpty()) {
                     drawInkStroke(
                         points = currentStrokePoints,
-                        color = Color(selectedColor.toULong()),
+                        color = argbColor(selectedColor),
                         width = DEFAULT_CANVAS_STROKE_WIDTH,
                         canvasOffset = canvasOffset,
                         canvasScale = canvasScale
@@ -372,9 +418,7 @@ private fun DrawToolbar(
     onColorChange: (Long) -> Unit,
     canUndo: Boolean,
     onUndo: () -> Unit,
-    onClear: () -> Unit,
-    onZoomOut: () -> Unit,
-    onZoomIn: () -> Unit
+    onClear: () -> Unit
 ) {
     Column {
         Row(
@@ -406,16 +450,6 @@ private fun DrawToolbar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                DrawChip(
-                    text = "-",
-                    selected = false,
-                    onClick = onZoomOut
-                )
-                DrawChip(
-                    text = "+",
-                    selected = false,
-                    onClick = onZoomIn
-                )
                 DrawChip(
                     text = "Undo",
                     selected = false,
@@ -501,7 +535,7 @@ private fun ColorSwatch(
         modifier = Modifier
             .size(24.dp)
             .background(
-                color = Color(color.toULong()),
+                color = argbColor(color),
                 shape = CircleShape
             )
             .border(
@@ -649,6 +683,48 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawInkStroke(
             join = StrokeJoin.Round
         )
     )
+}
+
+private fun centroidOf(
+    changes: List<PointerInputChange>
+): Offset {
+    if (changes.isEmpty()) {
+        return Offset.Zero
+    }
+
+    var x = 0f
+    var y = 0f
+
+    changes.forEach { change ->
+        x += change.position.x
+        y += change.position.y
+    }
+
+    return Offset(
+        x = x / changes.size,
+        y = y / changes.size
+    )
+}
+
+private fun averageDistanceFromCentroid(
+    changes: List<PointerInputChange>,
+    centroid: Offset
+): Float {
+    if (changes.isEmpty()) {
+        return 0f
+    }
+
+    var total = 0f
+
+    changes.forEach { change ->
+        total += (change.position - centroid).getDistance()
+    }
+
+    return total / changes.size
+}
+
+private fun argbColor(value: Long): Color {
+    return Color(value.toInt())
 }
 
 private enum class CanvasInteractionMode {
