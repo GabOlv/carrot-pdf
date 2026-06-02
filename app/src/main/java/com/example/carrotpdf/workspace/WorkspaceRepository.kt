@@ -57,6 +57,29 @@ class WorkspaceRepository(
         return updated
     }
 
+    fun updateCanvasStrokes(
+        tab: PdfTab,
+        strokes: List<CanvasInkStroke>
+    ): CarrotWorkspace {
+        val now = System.currentTimeMillis()
+        val workspace = loadOrCreate(tab)
+
+        if (workspace.canvas.strokes == strokes) {
+            return workspace
+        }
+
+        val updated = workspace.copy(
+            canvas = workspace.canvas.copy(
+                strokes = strokes,
+                updatedAt = now
+            ),
+            updatedAt = now
+        )
+
+        save(updated)
+        return updated
+    }
+
     fun load(tabId: String): CarrotWorkspace? {
         val file = workspaceFile(tabId)
 

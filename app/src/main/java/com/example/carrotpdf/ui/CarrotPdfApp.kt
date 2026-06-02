@@ -115,10 +115,12 @@ import com.example.carrotpdf.pdf.sharePdf
 import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.EmptyState
 import com.example.carrotpdf.ui.components.NotesWorkspaceSheet
+import com.example.carrotpdf.ui.components.WorkspaceMode
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
+import com.example.carrotpdf.workspace.CanvasInkStroke
 import com.example.carrotpdf.workspace.WorkspaceRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -187,7 +189,9 @@ private fun CarrotPdfContent(
     var currentPaperBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
     var reimportingTabId by remember { mutableStateOf<String?>(null) }
     var isWorkspaceOpen by remember { mutableStateOf(false) }
+    var workspaceMode by remember { mutableStateOf(WorkspaceMode.Notes) }
     var workspaceNotesText by remember { mutableStateOf("") }
+    var workspaceCanvasStrokes by remember { mutableStateOf<List<CanvasInkStroke>>(emptyList()) }
     var loadedWorkspaceTabId by remember { mutableStateOf<String?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
@@ -550,6 +554,9 @@ private fun CarrotPdfContent(
         selectedExternalLink = null
         selectedTextSelection = null
         currentPaperBoundsInWindow = null
+        loadedWorkspaceTabId = null
+        workspaceNotesText = ""
+        workspaceCanvasStrokes = emptyList()
 
         val tab = activeTab ?: return@LaunchedEffect
 
@@ -557,6 +564,7 @@ private fun CarrotPdfContent(
             val workspace = workspaceRepository.loadOrCreate(tab)
             withContext(Dispatchers.Main) {
                 workspaceNotesText = workspace.notes.text
+                workspaceCanvasStrokes = workspace.canvas.strokes
                 loadedWorkspaceTabId = tab.id
             }
         }
@@ -633,6 +641,23 @@ private fun CarrotPdfContent(
             workspaceRepository.updateNotes(
                 tab = tab,
                 text = workspaceNotesText
+            )
+        }
+    }
+
+    LaunchedEffect(activeTab?.id, loadedWorkspaceTabId, workspaceCanvasStrokes) {
+        val tab = activeTab ?: return@LaunchedEffect
+
+        if (loadedWorkspaceTabId != tab.id) {
+            return@LaunchedEffect
+        }
+
+        delay(WORKSPACE_SAVE_DEBOUNCE_MS)
+
+        withContext(Dispatchers.IO) {
+            workspaceRepository.updateCanvasStrokes(
+                tab = tab,
+                strokes = workspaceCanvasStrokes
             )
         }
     }
@@ -1094,6 +1119,14 @@ private fun CarrotPdfContent(
                     notesText = workspaceNotesText,
                     onNotesChange = { text ->
                         workspaceNotesText = text
+                    },
+                    selectedMode = workspaceMode,
+                    onModeChange = { mode ->
+                        workspaceMode = mode
+                    },
+                    canvasStrokes = workspaceCanvasStrokes,
+                    onCanvasStrokesChange = { strokes ->
+                        workspaceCanvasStrokes = strokes
                     },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
