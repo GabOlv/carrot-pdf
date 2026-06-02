@@ -109,6 +109,7 @@ import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
+import com.example.carrotpdf.workspace.PageInkStroke
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -126,6 +127,9 @@ fun ReaderStage(
     selectedTextSelection: PdfTextSelection?,
     suppressPageOverlays: Boolean,
     pageSizes: List<PdfPageSize>,
+    pageInkStrokes: List<PageInkStroke>,
+    isPdfInkActive: Boolean,
+    pdfInkColor: Long,
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
         pageCount: Int,
@@ -139,6 +143,7 @@ fun ReaderStage(
     onToggleChrome: () -> Unit,
     onRevealChrome: () -> Unit,
     onLinkTap: (PdfLinkRegion) -> Unit,
+    onPdfInkStroke: (PageInkStroke) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
@@ -201,7 +206,11 @@ fun ReaderStage(
                     selectedTextSelection = selectedTextSelection,
                     suppressPageOverlays = suppressPageOverlays,
                     pageSizes = pageSizes,
+                    pageInkStrokes = pageInkStrokes,
+                    isPdfInkActive = isPdfInkActive,
+                    pdfInkColor = pdfInkColor,
                     onLinkTap = onLinkTap,
+                    onPdfInkStroke = onPdfInkStroke,
                     onTextLongPress = onTextLongPress,
                     onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                     onUserInteraction = onUserInteraction,

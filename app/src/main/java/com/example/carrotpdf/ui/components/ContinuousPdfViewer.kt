@@ -32,12 +32,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -72,9 +76,13 @@ import com.example.carrotpdf.ui.viewer.render.rememberPdfRenderScheduler
 import com.example.carrotpdf.ui.viewer.state.PdfInteractionMode
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.viewport.PdfViewport
+import com.example.carrotpdf.workspace.InkPoint
+import com.example.carrotpdf.workspace.InkTool
+import com.example.carrotpdf.workspace.PageInkStroke
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 import kotlin.math.roundToInt
 
 @Composable
@@ -89,7 +97,11 @@ fun ContinuousPdfViewer(
     selectedTextSelection: PdfTextSelection? = null,
     suppressPageOverlays: Boolean = false,
     pageSizes: List<PdfPageSize> = emptyList(),
+    pageInkStrokes: List<PageInkStroke> = emptyList(),
+    isPdfInkActive: Boolean = false,
+    pdfInkColor: Long = DEFAULT_PDF_INK_COLOR,
     onLinkTap: (PdfLinkRegion) -> Unit = {},
+    onPdfInkStroke: (PageInkStroke) -> Unit = {},
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit = { _, _, _ -> },
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
@@ -460,10 +472,14 @@ fun ContinuousPdfViewer(
                                 searchResults = searchResults.searchResultsForPage(pageIndex),
                                 activeSearchResult = searchResults.getOrNull(activeSearchResultIndex),
                                 linkRegions = linkRegions.linkRegionsForPage(pageIndex),
+                                pageInkStrokes = pageInkStrokes.pageInkStrokesForPage(pageIndex),
+                                isPdfInkActive = isPdfInkActive,
+                                pdfInkColor = pdfInkColor,
                                 selectedTextSelection = selectedTextSelection
                                     ?.takeIf { selection -> selection.hasSelectionOnPage(pageIndex) },
                                 suppressPageOverlays = suppressPageOverlays,
                                 onLinkTap = onLinkTap,
+                                onPdfInkStroke = onPdfInkStroke,
                                 onTextLongPress = onTextLongPress,
                                 onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                                 onPageBoundsChange = { bounds ->
@@ -507,9 +523,13 @@ private fun PdfPageItem(
     searchResults: List<PdfSearchResult>,
     activeSearchResult: PdfSearchResult?,
     linkRegions: List<PdfLinkRegion>,
+    pageInkStrokes: List<PageInkStroke>,
+    isPdfInkActive: Boolean,
+    pdfInkColor: Long,
     selectedTextSelection: PdfTextSelection?,
     suppressPageOverlays: Boolean,
     onLinkTap: (PdfLinkRegion) -> Unit,
+    onPdfInkStroke: (PageInkStroke) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
@@ -534,6 +554,9 @@ private fun PdfPageItem(
     val renderState = renderSchedulerState.stateFor(renderKey)
     var displayedBitmap by remember(documentId, pageIndex) {
         mutableStateOf<Bitmap?>(null)
+    }
+    var currentPageInkPoints by remember(documentId, pageIndex) {
+        mutableStateOf<List<InkPoint>>(emptyList())
     }
     val density = LocalDensity.current
 
@@ -614,21 +637,40 @@ private fun PdfPageItem(
                             modifier = Modifier.fillMaxSize()
                         )
 
+                        PdfPageInkOverlay(
+                            strokes = pageInkStrokes,
+                            previewPoints = currentPageInkPoints,
+                            previewColor = pdfInkColor,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
                         TextSelectionOverlay(
                             pageIndex = pageIndex,
                             selection = selectedTextSelection,
                             modifier = Modifier.fillMaxSize()
                         )
 
-                        PdfPageInteractionOverlay(
-                            pageIndex = pageIndex,
-                            linkRegions = linkRegions,
-                            selectedTextSelection = selectedTextSelection,
-                            onLinkTap = onLinkTap,
-                            onTextLongPress = onTextLongPress,
-                            onTextSelectionHandleDrag = onTextSelectionHandleDrag,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        if (isPdfInkActive) {
+                            PdfPageInkInputOverlay(
+                                pageIndex = pageIndex,
+                                color = pdfInkColor,
+                                onPreviewChange = { points ->
+                                    currentPageInkPoints = points
+                                },
+                                onStroke = onPdfInkStroke,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            PdfPageInteractionOverlay(
+                                pageIndex = pageIndex,
+                                linkRegions = linkRegions,
+                                selectedTextSelection = selectedTextSelection,
+                                onLinkTap = onLinkTap,
+                                onTextLongPress = onTextLongPress,
+                                onTextSelectionHandleDrag = onTextSelectionHandleDrag,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }
@@ -698,6 +740,181 @@ private fun SearchHighlightOverlay(
 
 private fun List<PdfSearchResult>.searchResultsForPage(pageIndex: Int): List<PdfSearchResult> {
     return filter { it.pageIndex == pageIndex }
+}
+
+@Composable
+private fun PdfPageInkOverlay(
+    strokes: List<PageInkStroke>,
+    previewPoints: List<InkPoint>,
+    previewColor: Long,
+    modifier: Modifier = Modifier
+) {
+    if (strokes.isEmpty() && previewPoints.isEmpty()) {
+        return
+    }
+
+    Canvas(modifier = modifier) {
+        strokes.forEach { stroke ->
+            drawPageInkStroke(
+                points = stroke.points,
+                color = Color(stroke.color.toInt()),
+                width = stroke.width
+            )
+        }
+
+        if (previewPoints.isNotEmpty()) {
+            drawPageInkStroke(
+                points = previewPoints,
+                color = Color(previewColor.toInt()),
+                width = DEFAULT_PDF_INK_WIDTH
+            )
+        }
+    }
+}
+
+@Composable
+private fun PdfPageInkInputOverlay(
+    pageIndex: Int,
+    color: Long,
+    onPreviewChange: (List<InkPoint>) -> Unit,
+    onStroke: (PageInkStroke) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val currentOnPreviewChange = rememberUpdatedState(onPreviewChange)
+    val currentOnStroke = rememberUpdatedState(onStroke)
+    val currentColor = rememberUpdatedState(color)
+
+    Box(
+        modifier = modifier.pointerInput(pageIndex) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val canvasWidth = size.width.toFloat()
+                val canvasHeight = size.height.toFloat()
+
+                if (canvasWidth <= 0f || canvasHeight <= 0f) {
+                    return@awaitEachGesture
+                }
+
+                var points = listOf(
+                    down.position.toNormalizedInkPoint(
+                        width = canvasWidth,
+                        height = canvasHeight
+                    )
+                )
+                var isMultiTouchGesture = false
+
+                currentOnPreviewChange.value(points)
+
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val pressedChanges = event.changes.filter { change -> change.pressed }
+
+                    if (pressedChanges.isEmpty()) {
+                        if (!isMultiTouchGesture && points.isNotEmpty()) {
+                            event.changes.forEach { change ->
+                                change.consume()
+                            }
+                            currentOnStroke.value(
+                                PageInkStroke(
+                                    id = UUID.randomUUID().toString(),
+                                    pageIndex = pageIndex,
+                                    tool = InkTool.Pen,
+                                    color = currentColor.value,
+                                    width = DEFAULT_PDF_INK_WIDTH,
+                                    points = points
+                                )
+                            )
+                        }
+
+                        currentOnPreviewChange.value(emptyList())
+                        break
+                    }
+
+                    if (pressedChanges.size >= 2) {
+                        isMultiTouchGesture = true
+                        points = emptyList()
+                        currentOnPreviewChange.value(emptyList())
+                        continue
+                    }
+
+                    val change = pressedChanges.first()
+
+                    if (!isMultiTouchGesture) {
+                        points = points + change.position.toNormalizedInkPoint(
+                            width = canvasWidth,
+                            height = canvasHeight
+                        )
+                        currentOnPreviewChange.value(points)
+                        change.consume()
+                    }
+                }
+            }
+        }
+    )
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPageInkStroke(
+    points: List<InkPoint>,
+    color: Color,
+    width: Float
+) {
+    if (points.isEmpty()) {
+        return
+    }
+
+    val strokeWidth = (width * size.minDimension).coerceAtLeast(1.5f)
+
+    if (points.size == 1) {
+        val point = points.first()
+        drawCircle(
+            color = color,
+            radius = strokeWidth / 2f,
+            center = Offset(
+                x = point.x.coerceIn(0f, 1f) * size.width,
+                y = point.y.coerceIn(0f, 1f) * size.height
+            )
+        )
+        return
+    }
+
+    val path = Path().apply {
+        val first = points.first()
+        moveTo(
+            x = first.x.coerceIn(0f, 1f) * size.width,
+            y = first.y.coerceIn(0f, 1f) * size.height
+        )
+
+        points.drop(1).forEach { point ->
+            lineTo(
+                x = point.x.coerceIn(0f, 1f) * size.width,
+                y = point.y.coerceIn(0f, 1f) * size.height
+            )
+        }
+    }
+
+    drawPath(
+        path = path,
+        color = color,
+        style = Stroke(
+            width = strokeWidth,
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round
+        )
+    )
+}
+
+private fun Offset.toNormalizedInkPoint(
+    width: Float,
+    height: Float
+): InkPoint {
+    return InkPoint(
+        x = (x / width).coerceIn(0f, 1f),
+        y = (y / height).coerceIn(0f, 1f)
+    )
+}
+
+private fun List<PageInkStroke>.pageInkStrokesForPage(pageIndex: Int): List<PageInkStroke> {
+    return filter { stroke -> stroke.pageIndex == pageIndex }
 }
 
 private fun expandHighlightRect(
@@ -1148,6 +1365,8 @@ private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
 private const val PDF_TEXT_SELECTION_EXTRA_LONG_PRESS_MS = 220L
 private const val PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO = 0.45f
 private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.18f
+private const val DEFAULT_PDF_INK_COLOR = 0xFFFF7A1AL
+private const val DEFAULT_PDF_INK_WIDTH = 0.0048f
 private val TEXT_SELECTION_HANDLE_STEM = 5.dp
 private val TEXT_SELECTION_HANDLE_STEM_WIDTH = 1.6.dp
 private val TEXT_SELECTION_HANDLE_RADIUS = 5.6.dp

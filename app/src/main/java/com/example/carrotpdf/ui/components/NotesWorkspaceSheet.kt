@@ -63,14 +63,26 @@ enum class WorkspaceMode {
     Draw
 }
 
+enum class DrawTarget {
+    Canvas,
+    Pdf
+}
+
 @Composable
 fun NotesWorkspaceSheet(
     notesText: String,
     onNotesChange: (String) -> Unit,
     selectedMode: WorkspaceMode,
     onModeChange: (WorkspaceMode) -> Unit,
+    selectedDrawTarget: DrawTarget,
+    onDrawTargetChange: (DrawTarget) -> Unit,
+    selectedInkColor: Long,
+    onInkColorChange: (Long) -> Unit,
     canvasStrokes: List<CanvasInkStroke>,
     onCanvasStrokesChange: (List<CanvasInkStroke>) -> Unit,
+    pageInkStrokeCount: Int,
+    onUndoPageInk: () -> Unit,
+    onClearPageInk: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -141,9 +153,16 @@ fun NotesWorkspaceSheet(
                     onNotesChange = onNotesChange
                 )
 
-                WorkspaceMode.Draw -> FreeDrawCanvas(
-                    strokes = canvasStrokes,
-                    onStrokesChange = onCanvasStrokesChange
+                WorkspaceMode.Draw -> DrawWorkspace(
+                    selectedDrawTarget = selectedDrawTarget,
+                    onDrawTargetChange = onDrawTargetChange,
+                    selectedInkColor = selectedInkColor,
+                    onInkColorChange = onInkColorChange,
+                    canvasStrokes = canvasStrokes,
+                    onCanvasStrokesChange = onCanvasStrokesChange,
+                    pageInkStrokeCount = pageInkStrokeCount,
+                    onUndoPageInk = onUndoPageInk,
+                    onClearPageInk = onClearPageInk
                 )
             }
         }
@@ -191,12 +210,71 @@ private fun NotesEditor(
 }
 
 @Composable
+private fun DrawWorkspace(
+    selectedDrawTarget: DrawTarget,
+    onDrawTargetChange: (DrawTarget) -> Unit,
+    selectedInkColor: Long,
+    onInkColorChange: (Long) -> Unit,
+    canvasStrokes: List<CanvasInkStroke>,
+    onCanvasStrokesChange: (List<CanvasInkStroke>) -> Unit,
+    pageInkStrokeCount: Int,
+    onUndoPageInk: () -> Unit,
+    onClearPageInk: () -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            DrawChip(
+                text = "Canvas",
+                selected = selectedDrawTarget == DrawTarget.Canvas,
+                onClick = {
+                    onDrawTargetChange(DrawTarget.Canvas)
+                }
+            )
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            DrawChip(
+                text = "PDF",
+                selected = selectedDrawTarget == DrawTarget.Pdf,
+                onClick = {
+                    onDrawTargetChange(DrawTarget.Pdf)
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        when (selectedDrawTarget) {
+            DrawTarget.Canvas -> FreeDrawCanvas(
+                strokes = canvasStrokes,
+                onStrokesChange = onCanvasStrokesChange,
+                selectedColor = selectedInkColor,
+                onColorChange = onInkColorChange
+            )
+
+            DrawTarget.Pdf -> PdfDrawPanel(
+                selectedColor = selectedInkColor,
+                onColorChange = onInkColorChange,
+                strokeCount = pageInkStrokeCount,
+                onUndo = onUndoPageInk,
+                onClear = onClearPageInk
+            )
+        }
+    }
+}
+
+@Composable
 private fun FreeDrawCanvas(
     strokes: List<CanvasInkStroke>,
-    onStrokesChange: (List<CanvasInkStroke>) -> Unit
+    onStrokesChange: (List<CanvasInkStroke>) -> Unit,
+    selectedColor: Long,
+    onColorChange: (Long) -> Unit
 ) {
     var interactionMode by remember { mutableStateOf(CanvasInteractionMode.Draw) }
-    var selectedColor by remember { mutableStateOf(DRAW_COLORS.first()) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var canvasScale by remember { mutableFloatStateOf(INITIAL_CANVAS_SCALE) }
     var canvasOffset by remember { mutableStateOf(Offset.Zero) }
@@ -244,7 +322,7 @@ private fun FreeDrawCanvas(
             },
             selectedColor = selectedColor,
             onColorChange = { color ->
-                selectedColor = color
+                onColorChange(color)
             },
             canUndo = strokes.isNotEmpty(),
             onUndo = {
@@ -405,6 +483,86 @@ private fun FreeDrawCanvas(
                         canvasScale = canvasScale
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PdfDrawPanel(
+    selectedColor: Long,
+    onColorChange: (Long) -> Unit,
+    strokeCount: Int,
+    onUndo: () -> Unit,
+    onClear: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = Color.White.copy(alpha = 0.04f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(14.dp)
+    ) {
+        Text(
+            text = "Draw on the PDF page",
+            color = CarrotColors.TextPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Use one finger for ink. Use two fingers to zoom or pan the document.",
+            color = CarrotColors.TextMuted,
+            style = MaterialTheme.typography.bodySmall
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DRAW_COLORS.forEach { color ->
+                    ColorSwatch(
+                        color = color,
+                        selected = color == selectedColor,
+                        onClick = {
+                            onColorChange(color)
+                        }
+                    )
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DrawChip(
+                    text = "Undo",
+                    selected = false,
+                    enabled = strokeCount > 0,
+                    onClick = onUndo
+                )
+                DrawChip(
+                    text = "Clear",
+                    selected = false,
+                    enabled = strokeCount > 0,
+                    onClick = onClear
+                )
             }
         }
     }

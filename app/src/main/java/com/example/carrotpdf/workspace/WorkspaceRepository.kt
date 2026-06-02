@@ -80,6 +80,26 @@ class WorkspaceRepository(
         return updated
     }
 
+    fun updatePageInkStrokes(
+        tab: PdfTab,
+        strokes: List<PageInkStroke>
+    ): CarrotWorkspace {
+        val now = System.currentTimeMillis()
+        val workspace = loadOrCreate(tab)
+
+        if (workspace.pageInk == strokes) {
+            return workspace
+        }
+
+        val updated = workspace.copy(
+            pageInk = strokes,
+            updatedAt = now
+        )
+
+        save(updated)
+        return updated
+    }
+
     fun load(tabId: String): CarrotWorkspace? {
         val file = workspaceFile(tabId)
 
