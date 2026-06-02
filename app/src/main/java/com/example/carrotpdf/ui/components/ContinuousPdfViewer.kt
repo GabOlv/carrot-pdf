@@ -906,10 +906,13 @@ private fun PdfTextMarkerInputOverlay(
                     return@awaitEachGesture
                 }
 
+                var activePointerId = down.id
+                var isStylusGesture = down.isStylusLikePointer()
                 var points = listOf(
                     down.position.toNormalizedInkPoint(
                         width = canvasWidth,
-                        height = canvasHeight
+                        height = canvasHeight,
+                        pressure = down.pressure
                     )
                 )
                 var isMultiTouchGesture = false
@@ -917,8 +920,11 @@ private fun PdfTextMarkerInputOverlay(
                 while (true) {
                     val event = awaitPointerEvent()
                     val pressedChanges = event.changes.filter { change -> change.pressed }
+                    val activeWasReleased = event.changes.any { change ->
+                        change.id == activePointerId && !change.pressed
+                    }
 
-                    if (pressedChanges.isEmpty()) {
+                    if (pressedChanges.isEmpty() || (isStylusGesture && activeWasReleased)) {
                         if (!isMultiTouchGesture && points.isNotEmpty()) {
                             event.changes.forEach { change ->
                                 change.consume()
@@ -928,24 +934,46 @@ private fun PdfTextMarkerInputOverlay(
                         break
                     }
 
-                    if (pressedChanges.size >= 2) {
+                    val change = pressedChanges.preferredInkChange(activePointerId) ?: continue
+
+                    if (!isStylusGesture && change.isStylusLikePointer()) {
+                        activePointerId = change.id
+                        isStylusGesture = true
+                        points = listOf(
+                            change.position.toNormalizedInkPoint(
+                                width = canvasWidth,
+                                height = canvasHeight,
+                                pressure = change.pressure
+                            )
+                        )
+                    }
+
+                    if (isStylusGesture && !change.isStylusLikePointer()) {
+                        pressedChanges.forEach { pressedChange -> pressedChange.consume() }
+                        continue
+                    }
+
+                    if (!isStylusGesture && pressedChanges.size >= 2) {
                         isMultiTouchGesture = true
                         points = emptyList()
                         continue
                     }
 
-                    val change = pressedChanges.first()
-
                     if (!isMultiTouchGesture) {
                         val nextPoint = change.position.toNormalizedInkPoint(
                             width = canvasWidth,
-                            height = canvasHeight
+                            height = canvasHeight,
+                            pressure = change.pressure
                         )
                         points = points.appendInkPointIfFarEnough(
                             point = nextPoint,
                             minDistance = MIN_PDF_MARKER_POINT_DISTANCE
                         )
-                        change.consume()
+                        pressedChanges.forEach { pressedChange ->
+                            if (isStylusGesture || pressedChange.id == activePointerId) {
+                                pressedChange.consume()
+                            }
+                        }
                     }
                 }
             }
@@ -982,29 +1010,40 @@ private fun PdfPageInkInputOverlay(
                     return@awaitEachGesture
                 }
 
+                var activePointerId = down.id
+                var isStylusGesture = down.isStylusLikePointer()
+                var effectiveTool = if (down.isStylusEraserPointer()) {
+                    InkTool.Eraser
+                } else {
+                    currentTool.value
+                }
                 var points = listOf(
                     down.position.toNormalizedInkPoint(
                         width = canvasWidth,
-                        height = canvasHeight
+                        height = canvasHeight,
+                        pressure = down.pressure
                     )
                 )
                 var isMultiTouchGesture = false
 
-                if (currentTool.value == InkTool.Pen) {
+                if (effectiveTool == InkTool.Pen) {
                     currentOnPreviewChange.value(points)
                 }
 
                 while (true) {
                     val event = awaitPointerEvent()
                     val pressedChanges = event.changes.filter { change -> change.pressed }
+                    val activeWasReleased = event.changes.any { change ->
+                        change.id == activePointerId && !change.pressed
+                    }
 
-                    if (pressedChanges.isEmpty()) {
+                    if (pressedChanges.isEmpty() || (isStylusGesture && activeWasReleased)) {
                         if (!isMultiTouchGesture && points.isNotEmpty()) {
                             event.changes.forEach { change ->
                                 change.consume()
                             }
 
-                            if (currentTool.value == InkTool.Eraser) {
+                            if (effectiveTool == InkTool.Eraser) {
                                 currentOnErase.value(pageIndex, points)
                             } else {
                                 currentOnStroke.value(
@@ -1024,28 +1063,61 @@ private fun PdfPageInkInputOverlay(
                         break
                     }
 
-                    if (pressedChanges.size >= 2) {
+                    val change = pressedChanges.preferredInkChange(activePointerId) ?: continue
+
+                    if (!isStylusGesture && change.isStylusLikePointer()) {
+                        activePointerId = change.id
+                        isStylusGesture = true
+                        effectiveTool = if (change.isStylusEraserPointer()) {
+                            InkTool.Eraser
+                        } else {
+                            currentTool.value
+                        }
+                        points = listOf(
+                            change.position.toNormalizedInkPoint(
+                                width = canvasWidth,
+                                height = canvasHeight,
+                                pressure = change.pressure
+                            )
+                        )
+                        currentOnPreviewChange.value(
+                            if (effectiveTool == InkTool.Pen) points else emptyList()
+                        )
+                    } else if (change.isStylusEraserPointer()) {
+                        effectiveTool = InkTool.Eraser
+                        currentOnPreviewChange.value(emptyList())
+                    }
+
+                    if (isStylusGesture && !change.isStylusLikePointer()) {
+                        pressedChanges.forEach { pressedChange -> pressedChange.consume() }
+                        continue
+                    }
+
+                    if (!isStylusGesture && pressedChanges.size >= 2) {
                         isMultiTouchGesture = true
                         points = emptyList()
                         currentOnPreviewChange.value(emptyList())
                         continue
                     }
 
-                    val change = pressedChanges.first()
-
                     if (!isMultiTouchGesture) {
                         val nextPoint = change.position.toNormalizedInkPoint(
                             width = canvasWidth,
-                            height = canvasHeight
+                            height = canvasHeight,
+                            pressure = change.pressure
                         )
                         points = points.appendInkPointIfFarEnough(
                             point = nextPoint,
                             minDistance = MIN_PDF_INK_POINT_DISTANCE
                         )
-                        if (currentTool.value == InkTool.Pen) {
+                        if (effectiveTool == InkTool.Pen) {
                             currentOnPreviewChange.value(points)
                         }
-                        change.consume()
+                        pressedChanges.forEach { pressedChange ->
+                            if (isStylusGesture || pressedChange.id == activePointerId) {
+                                pressedChange.consume()
+                            }
+                        }
                     }
                 }
             }
@@ -1142,11 +1214,13 @@ private fun List<InkPoint>.appendInkPointIfFarEnough(
 
 private fun Offset.toNormalizedInkPoint(
     width: Float,
-    height: Float
+    height: Float,
+    pressure: Float = 1f
 ): InkPoint {
     return InkPoint(
         x = (x / width).coerceIn(0f, 1f),
-        y = (y / height).coerceIn(0f, 1f)
+        y = (y / height).coerceIn(0f, 1f),
+        pressure = pressure.coerceIn(0f, 1f)
     )
 }
 

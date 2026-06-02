@@ -395,12 +395,16 @@ private fun FreeDrawCanvas(
         )
     }
 
-    fun screenToCanvas(position: Offset): InkPoint {
+    fun screenToCanvas(
+        position: Offset,
+        pressure: Float = 1f
+    ): InkPoint {
         return InkPoint(
             x = ((position.x - canvasOffset.x) / canvasScale)
                 .coerceIn(0f, DRAW_CANVAS_WIDTH),
             y = ((position.y - canvasOffset.y) / canvasScale)
-                .coerceIn(0f, DRAW_CANVAS_HEIGHT)
+                .coerceIn(0f, DRAW_CANVAS_HEIGHT),
+            pressure = pressure.coerceIn(0f, 1f)
         )
     }
 
@@ -431,13 +435,20 @@ private fun FreeDrawCanvas(
                 .pointerInput(selectedTool) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        var gestureStrokePoints = if (selectedTool == WorkspaceDrawTool.Pen || selectedTool == WorkspaceDrawTool.Marker) {
-                            listOf(screenToCanvas(down.position))
+                        var activePointerId = down.id
+                        var isStylusGesture = down.isStylusLikePointer()
+                        var effectiveTool = if (down.isStylusEraserPointer()) {
+                            WorkspaceDrawTool.Eraser
+                        } else {
+                            selectedTool
+                        }
+                        var gestureStrokePoints = if (effectiveTool == WorkspaceDrawTool.Pen || effectiveTool == WorkspaceDrawTool.Marker) {
+                            listOf(screenToCanvas(down.position, down.pressure))
                         } else {
                             emptyList()
                         }
-                        var erasePoints = if (selectedTool == WorkspaceDrawTool.Eraser) {
-                            listOf(screenToCanvas(down.position))
+                        var erasePoints = if (effectiveTool == WorkspaceDrawTool.Eraser) {
+                            listOf(screenToCanvas(down.position, down.pressure))
                         } else {
                             emptyList()
                         }
@@ -450,17 +461,20 @@ private fun FreeDrawCanvas(
                         while (true) {
                             val event = awaitPointerEvent()
                             val pressedChanges = event.changes.filter { change -> change.pressed }
+                            val activeWasReleased = event.changes.any { change ->
+                                change.id == activePointerId && !change.pressed
+                            }
 
-                            if (pressedChanges.isEmpty()) {
+                            if (pressedChanges.isEmpty() || (isStylusGesture && activeWasReleased)) {
                                 if (
                                     !isTransforming &&
-                                    (selectedTool == WorkspaceDrawTool.Pen || selectedTool == WorkspaceDrawTool.Marker) &&
+                                    (effectiveTool == WorkspaceDrawTool.Pen || effectiveTool == WorkspaceDrawTool.Marker) &&
                                     gestureStrokePoints.size > 1
                                 ) {
                                     latestOnStrokesChange(
                                         latestStrokes + CanvasInkStroke(
                                             id = UUID.randomUUID().toString(),
-                                            tool = if (selectedTool == WorkspaceDrawTool.Marker) {
+                                            tool = if (effectiveTool == WorkspaceDrawTool.Marker) {
                                                 InkTool.Highlighter
                                             } else {
                                                 InkTool.Pen
@@ -472,7 +486,7 @@ private fun FreeDrawCanvas(
                                     )
                                 } else if (
                                     !isTransforming &&
-                                    selectedTool == WorkspaceDrawTool.Eraser &&
+                                    effectiveTool == WorkspaceDrawTool.Eraser &&
                                     erasePoints.isNotEmpty()
                                 ) {
                                     latestOnStrokesChange(
@@ -484,7 +498,42 @@ private fun FreeDrawCanvas(
                                 break
                             }
 
-                            if (pressedChanges.size >= 2) {
+                            val change = pressedChanges.preferredInkChange(activePointerId) ?: continue
+
+                            if (!isStylusGesture && change.isStylusLikePointer()) {
+                                activePointerId = change.id
+                                isStylusGesture = true
+                                effectiveTool = if (change.isStylusEraserPointer()) {
+                                    WorkspaceDrawTool.Eraser
+                                } else {
+                                    selectedTool
+                                }
+                                gestureStrokePoints =
+                                    if (effectiveTool == WorkspaceDrawTool.Pen || effectiveTool == WorkspaceDrawTool.Marker) {
+                                        listOf(screenToCanvas(change.position, change.pressure))
+                                    } else {
+                                        emptyList()
+                                    }
+                                erasePoints = if (effectiveTool == WorkspaceDrawTool.Eraser) {
+                                    listOf(screenToCanvas(change.position, change.pressure))
+                                } else {
+                                    emptyList()
+                                }
+                                currentStrokePoints = gestureStrokePoints
+                                isTransforming = false
+                                lastCentroid = null
+                                lastDistance = 0f
+                            } else if (change.isStylusEraserPointer()) {
+                                effectiveTool = WorkspaceDrawTool.Eraser
+                                currentStrokePoints = emptyList()
+                            }
+
+                            if (isStylusGesture && !change.isStylusLikePointer()) {
+                                pressedChanges.forEach { pressedChange -> pressedChange.consume() }
+                                continue
+                            }
+
+                            if (!isStylusGesture && pressedChanges.size >= 2) {
                                 isTransforming = true
                                 gestureStrokePoints = emptyList()
                                 currentStrokePoints = emptyList()
@@ -525,30 +574,33 @@ private fun FreeDrawCanvas(
                                 lastDistance = distance
                                 pressedChanges.forEach { change -> change.consume() }
                             } else {
-                                val change = pressedChanges.first()
                                 lastCentroid = null
                                 lastDistance = 0f
 
-                                if (isTransforming || selectedTool == WorkspaceDrawTool.Move) {
+                                if (isTransforming || effectiveTool == WorkspaceDrawTool.Move) {
                                     canvasOffset = clampOffset(
                                         canvasOffset + change.positionChange(),
                                         canvasScale
                                     )
-                                } else if (selectedTool == WorkspaceDrawTool.Eraser) {
+                                } else if (effectiveTool == WorkspaceDrawTool.Eraser) {
                                     erasePoints = erasePoints.appendInkPointIfFarEnough(
-                                        point = screenToCanvas(change.position),
+                                        point = screenToCanvas(change.position, change.pressure),
                                         minDistance = CANVAS_ERASER_SAMPLE_DISTANCE
                                     )
                                 } else {
                                     gestureStrokePoints = gestureStrokePoints.appendInkPointIfFarEnough(
-                                        point = screenToCanvas(change.position),
+                                        point = screenToCanvas(change.position, change.pressure),
                                         minDistance = (latestSelectedStrokeWidth * 0.16f)
                                             .coerceAtLeast(MIN_CANVAS_INK_POINT_DISTANCE)
                                     )
                                     currentStrokePoints = gestureStrokePoints
                                 }
 
-                                change.consume()
+                                pressedChanges.forEach { pressedChange ->
+                                    if (isStylusGesture || pressedChange.id == activePointerId) {
+                                        pressedChange.consume()
+                                    }
+                                }
                             }
                         }
                     }
