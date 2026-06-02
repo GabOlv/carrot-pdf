@@ -99,9 +99,11 @@ fun ContinuousPdfViewer(
     pageSizes: List<PdfPageSize> = emptyList(),
     pageInkStrokes: List<PageInkStroke> = emptyList(),
     isPdfInkActive: Boolean = false,
+    pdfInkTool: InkTool = InkTool.Pen,
     pdfInkColor: Long = DEFAULT_PDF_INK_COLOR,
     onLinkTap: (PdfLinkRegion) -> Unit = {},
     onPdfInkStroke: (PageInkStroke) -> Unit = {},
+    onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit = { _, _ -> },
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit = { _, _, _ -> },
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
@@ -474,12 +476,14 @@ fun ContinuousPdfViewer(
                                 linkRegions = linkRegions.linkRegionsForPage(pageIndex),
                                 pageInkStrokes = pageInkStrokes.pageInkStrokesForPage(pageIndex),
                                 isPdfInkActive = isPdfInkActive,
+                                pdfInkTool = pdfInkTool,
                                 pdfInkColor = pdfInkColor,
                                 selectedTextSelection = selectedTextSelection
                                     ?.takeIf { selection -> selection.hasSelectionOnPage(pageIndex) },
                                 suppressPageOverlays = suppressPageOverlays,
                                 onLinkTap = onLinkTap,
                                 onPdfInkStroke = onPdfInkStroke,
+                                onPdfInkErase = onPdfInkErase,
                                 onTextLongPress = onTextLongPress,
                                 onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                                 onPageBoundsChange = { bounds ->
@@ -525,11 +529,13 @@ private fun PdfPageItem(
     linkRegions: List<PdfLinkRegion>,
     pageInkStrokes: List<PageInkStroke>,
     isPdfInkActive: Boolean,
+    pdfInkTool: InkTool,
     pdfInkColor: Long,
     selectedTextSelection: PdfTextSelection?,
     suppressPageOverlays: Boolean,
     onLinkTap: (PdfLinkRegion) -> Unit,
     onPdfInkStroke: (PageInkStroke) -> Unit,
+    onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
@@ -653,11 +659,13 @@ private fun PdfPageItem(
                         if (isPdfInkActive) {
                             PdfPageInkInputOverlay(
                                 pageIndex = pageIndex,
+                                tool = pdfInkTool,
                                 color = pdfInkColor,
                                 onPreviewChange = { points ->
                                     currentPageInkPoints = points
                                 },
                                 onStroke = onPdfInkStroke,
+                                onErase = onPdfInkErase,
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
@@ -775,17 +783,21 @@ private fun PdfPageInkOverlay(
 @Composable
 private fun PdfPageInkInputOverlay(
     pageIndex: Int,
+    tool: InkTool,
     color: Long,
     onPreviewChange: (List<InkPoint>) -> Unit,
     onStroke: (PageInkStroke) -> Unit,
+    onErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentOnPreviewChange = rememberUpdatedState(onPreviewChange)
     val currentOnStroke = rememberUpdatedState(onStroke)
+    val currentOnErase = rememberUpdatedState(onErase)
+    val currentTool = rememberUpdatedState(tool)
     val currentColor = rememberUpdatedState(color)
 
     Box(
-        modifier = modifier.pointerInput(pageIndex) {
+        modifier = modifier.pointerInput(pageIndex, tool) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val canvasWidth = size.width.toFloat()
@@ -803,7 +815,9 @@ private fun PdfPageInkInputOverlay(
                 )
                 var isMultiTouchGesture = false
 
-                currentOnPreviewChange.value(points)
+                if (currentTool.value == InkTool.Pen) {
+                    currentOnPreviewChange.value(points)
+                }
 
                 while (true) {
                     val event = awaitPointerEvent()
@@ -814,16 +828,21 @@ private fun PdfPageInkInputOverlay(
                             event.changes.forEach { change ->
                                 change.consume()
                             }
-                            currentOnStroke.value(
-                                PageInkStroke(
-                                    id = UUID.randomUUID().toString(),
-                                    pageIndex = pageIndex,
-                                    tool = InkTool.Pen,
-                                    color = currentColor.value,
-                                    width = DEFAULT_PDF_INK_WIDTH,
-                                    points = points
+
+                            if (currentTool.value == InkTool.Eraser) {
+                                currentOnErase.value(pageIndex, points)
+                            } else {
+                                currentOnStroke.value(
+                                    PageInkStroke(
+                                        id = UUID.randomUUID().toString(),
+                                        pageIndex = pageIndex,
+                                        tool = InkTool.Pen,
+                                        color = currentColor.value,
+                                        width = DEFAULT_PDF_INK_WIDTH,
+                                        points = points
+                                    )
                                 )
-                            )
+                            }
                         }
 
                         currentOnPreviewChange.value(emptyList())
@@ -844,7 +863,9 @@ private fun PdfPageInkInputOverlay(
                             width = canvasWidth,
                             height = canvasHeight
                         )
-                        currentOnPreviewChange.value(points)
+                        if (currentTool.value == InkTool.Pen) {
+                            currentOnPreviewChange.value(points)
+                        }
                         change.consume()
                     }
                 }

@@ -117,12 +117,16 @@ import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.DrawTarget
 import com.example.carrotpdf.ui.components.EmptyState
 import com.example.carrotpdf.ui.components.NotesWorkspaceSheet
+import com.example.carrotpdf.ui.components.WorkspaceDrawTool
 import com.example.carrotpdf.ui.components.WorkspaceMode
+import com.example.carrotpdf.ui.components.WorkspaceSheetLayout
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import com.example.carrotpdf.workspace.CanvasInkStroke
+import com.example.carrotpdf.workspace.InkPoint
+import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
 import com.example.carrotpdf.workspace.WorkspaceCanvas
 import com.example.carrotpdf.workspace.WorkspaceRepository
@@ -198,6 +202,7 @@ private fun CarrotPdfContent(
     var isWorkspaceOpen by remember { mutableStateOf(false) }
     var workspaceMode by remember { mutableStateOf(WorkspaceMode.Notes) }
     var workspaceDrawTarget by remember { mutableStateOf(DrawTarget.Canvas) }
+    var workspaceDrawTool by remember { mutableStateOf(WorkspaceDrawTool.Pen) }
     var workspaceInkColor by remember { mutableStateOf(DEFAULT_WORKSPACE_INK_COLOR) }
     var workspaceNotesText by remember { mutableStateOf("") }
     var workspaceCanvasStrokes by remember { mutableStateOf<List<CanvasInkStroke>>(emptyList()) }
@@ -210,6 +215,11 @@ private fun CarrotPdfContent(
         workspaceDrawTarget == DrawTarget.Pdf &&
         activeTab != null &&
         !activeTab.isMissing
+    val activePdfInkTool = if (workspaceDrawTool == WorkspaceDrawTool.Eraser) {
+        InkTool.Eraser
+    } else {
+        InkTool.Pen
+    }
     val activeViewerState = rememberActiveViewerState(activeTab)
     val activeSearchSession = remember(activeTab?.id, activeTab?.uri, activeTab?.isMissing) {
         activeTab?.takeUnless { it.isMissing }?.let { tab ->
@@ -800,11 +810,13 @@ private fun CarrotPdfContent(
         modifier = Modifier.fillMaxSize(),
         color = CarrotColors.PdfCanvas
     ) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .background(CarrotColors.PdfCanvas)
         ) {
+            val isTabletWorkspace = maxWidth >= TABLET_WORKSPACE_BREAKPOINT
+
             ReaderStage(
                 activeTab = activeTab,
                 viewerState = activeViewerState,
@@ -817,6 +829,7 @@ private fun CarrotPdfContent(
                 pageSizes = activeTab?.pageSizes.orEmpty(),
                 pageInkStrokes = workspacePageInkStrokes,
                 isPdfInkActive = isPdfInkActive,
+                pdfInkTool = activePdfInkTool,
                 pdfInkColor = workspaceInkColor,
                 pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                     DrivePageIndicator(
@@ -882,6 +895,14 @@ private fun CarrotPdfContent(
                     selectedExternalLink = null
                     selectedTextSelection = null
                     workspacePageInkStrokes = workspacePageInkStrokes + stroke
+                },
+                onPdfInkErase = { pageIndex, points ->
+                    selectedExternalLink = null
+                    selectedTextSelection = null
+                    workspacePageInkStrokes = workspacePageInkStrokes.erasePageInkStrokes(
+                        pageIndex = pageIndex,
+                        erasePoints = points
+                    )
                 },
                 onTextLongPress = { pageIndex, normalizedX, normalizedY ->
                     val session = activeTextIndexSession ?: return@ReaderStage
@@ -1227,6 +1248,10 @@ private fun CarrotPdfContent(
                             selectedTextSelection = null
                         }
                     },
+                    selectedDrawTool = workspaceDrawTool,
+                    onDrawToolChange = { tool ->
+                        workspaceDrawTool = tool
+                    },
                     selectedInkColor = workspaceInkColor,
                     onInkColorChange = { color ->
                         workspaceInkColor = color
@@ -1241,12 +1266,28 @@ private fun CarrotPdfContent(
                             workspacePageInkStrokes = workspacePageInkStrokes.dropLast(1)
                         }
                     },
-                    onClearPageInk = {
-                        if (workspacePageInkStrokes.isNotEmpty()) {
-                            workspacePageInkStrokes = emptyList()
-                        }
+                    onCollapse = {
+                        isWorkspaceOpen = false
                     },
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    layout = if (isTabletWorkspace) {
+                        WorkspaceSheetLayout.Side
+                    } else {
+                        WorkspaceSheetLayout.Bottom
+                    },
+                    modifier = if (isTabletWorkspace) {
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(320.dp)
+                            .padding(
+                                top = statusBarTop + TOP_BAR_HEIGHT + 8.dp,
+                                end = 14.dp,
+                                bottom = navigationBarBottom + 14.dp
+                            )
+                    } else {
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = navigationBarBottom)
+                    }
                 )
             }
 
@@ -1447,6 +1488,26 @@ private fun updateActiveTab(
     }
 }
 
+private fun List<PageInkStroke>.erasePageInkStrokes(
+    pageIndex: Int,
+    erasePoints: List<InkPoint>
+): List<PageInkStroke> {
+    if (erasePoints.isEmpty()) {
+        return this
+    }
+
+    return filterNot { stroke ->
+        stroke.pageIndex == pageIndex &&
+            stroke.points.any { point ->
+                erasePoints.any { eraser ->
+                    val dx = point.x - eraser.x
+                    val dy = point.y - eraser.y
+                    dx * dx + dy * dy <= PAGE_INK_ERASER_RADIUS * PAGE_INK_ERASER_RADIUS
+                }
+            }
+    }
+}
+
 private fun PdfViewerState.requestScrollToSearchResult(
     result: PdfSearchResult
 ) {
@@ -1630,4 +1691,5 @@ const val DOCUMENT_LOAD_TIMEOUT_MS = 12_000L
 const val SCREENSHOT_CAPTURE_DELAY_MS = 120L
 const val WORKSPACE_SAVE_DEBOUNCE_MS = 450L
 const val DEFAULT_WORKSPACE_INK_COLOR = 0xFFFF7A1AL
-
+val TABLET_WORKSPACE_BREAKPOINT = 700.dp
+const val PAGE_INK_ERASER_RADIUS = 0.022f
