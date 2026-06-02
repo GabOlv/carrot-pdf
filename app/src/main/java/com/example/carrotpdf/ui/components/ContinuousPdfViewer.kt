@@ -776,9 +776,9 @@ private fun SearchHighlightOverlay(
         results.forEach { result ->
             val isActive = result == activeSearchResult
             val color = if (isActive) {
-                Color(0x66FF8A1F)
+                Color(0x57FF8A1F)
             } else {
-                Color(0x55FFD84D)
+                Color(0x48FFD84D)
             }
 
             result.bounds.forEach { bound ->
@@ -1284,7 +1284,17 @@ private fun TextSelectionOverlay(
             height = size.height
         )
 
-        selectionRects.forEach { rect ->
+        val expandedSelectionRects = selectionRects.map { rect ->
+            expandHighlightRect(
+                left = rect.left,
+                top = rect.top,
+                right = rect.right,
+                bottom = rect.bottom,
+                maxHeight = size.height
+            )
+        }
+
+        expandedSelectionRects.forEach { rect ->
             drawRect(
                 color = TEXT_SELECTION_FILL,
                 topLeft = androidx.compose.ui.geometry.Offset(rect.left, rect.top),
@@ -1296,8 +1306,8 @@ private fun TextSelectionOverlay(
             )
         }
 
-        val firstRect = selectionRects.firstOrNull()
-        val lastRect = selectionRects.lastOrNull()
+        val firstRect = expandedSelectionRects.firstOrNull()
+        val lastRect = expandedSelectionRects.lastOrNull()
         val drawsStartHandle = selection.pageRanges.firstOrNull()?.pageIndex == pageIndex
         val drawsEndHandle = selection.pageRanges.lastOrNull()?.pageIndex == pageIndex
 
@@ -1605,18 +1615,18 @@ private const val LINK_TAP_MAX_DURATION_MS = 700L
 private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
 private const val PDF_TEXT_SELECTION_EXTRA_LONG_PRESS_MS = 220L
 private const val PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO = 0.45f
-private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.18f
+private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.24f
 private const val DEFAULT_PDF_INK_COLOR = 0xFFFF7A1AL
 private const val DEFAULT_PDF_INK_WIDTH = 0.0048f
 private const val MIN_PDF_INK_POINT_DISTANCE = 0.0018f
 private const val MIN_PDF_MARKER_POINT_DISTANCE = 0.008f
-private const val TEXT_MARKER_ALPHA = 0.34f
+private const val TEXT_MARKER_ALPHA = 0.29f
 private val PDF_INK_SCROLL_STRIP_WIDTH = 44.dp
 private val TEXT_SELECTION_HANDLE_STEM = 5.dp
 private val TEXT_SELECTION_HANDLE_STEM_WIDTH = 1.6.dp
 private val TEXT_SELECTION_HANDLE_RADIUS = 5.6.dp
 private val TEXT_SELECTION_HANDLE_HIT_RADIUS = 18.dp
-private val TEXT_SELECTION_FILL = Color(0x3835B9F5)
+private val TEXT_SELECTION_FILL = Color(0x3035B9F5)
 private val TEXT_SELECTION_HANDLE = Color(0xEE2DB7EC)
 private val TEXT_SELECTION_HANDLE_INNER = Color(0x6635D2FF)
 
