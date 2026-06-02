@@ -114,6 +114,7 @@ import com.example.carrotpdf.pdf.saveScreenshot
 import com.example.carrotpdf.pdf.sharePdf
 import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.EmptyState
+import com.example.carrotpdf.ui.components.NotesWorkspaceSheet
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
@@ -185,6 +186,9 @@ private fun CarrotPdfContent(
     var isCapturingScreenshot by remember { mutableStateOf(false) }
     var currentPaperBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
     var reimportingTabId by remember { mutableStateOf<String?>(null) }
+    var isWorkspaceOpen by remember { mutableStateOf(false) }
+    var workspaceNotesText by remember { mutableStateOf("") }
+    var loadedWorkspaceTabId by remember { mutableStateOf<String?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val activeViewerState = rememberActiveViewerState(activeTab)
@@ -467,6 +471,10 @@ private fun CarrotPdfContent(
         selectedTextSelection = null
     }
 
+    BackHandler(enabled = isWorkspaceOpen) {
+        isWorkspaceOpen = false
+    }
+
     DisposableEffect(activity, tabs, activeTabId) {
         val lifecycle = (activity as? LifecycleOwner)?.lifecycle
 
@@ -546,7 +554,11 @@ private fun CarrotPdfContent(
         val tab = activeTab ?: return@LaunchedEffect
 
         withContext(Dispatchers.IO) {
-            workspaceRepository.loadOrCreate(tab)
+            val workspace = workspaceRepository.loadOrCreate(tab)
+            withContext(Dispatchers.Main) {
+                workspaceNotesText = workspace.notes.text
+                loadedWorkspaceTabId = tab.id
+            }
         }
 
         if (tab.isMissing) {
@@ -605,6 +617,23 @@ private fun CarrotPdfContent(
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+        }
+    }
+
+    LaunchedEffect(activeTab?.id, loadedWorkspaceTabId, workspaceNotesText) {
+        val tab = activeTab ?: return@LaunchedEffect
+
+        if (loadedWorkspaceTabId != tab.id) {
+            return@LaunchedEffect
+        }
+
+        delay(WORKSPACE_SAVE_DEBOUNCE_MS)
+
+        withContext(Dispatchers.IO) {
+            workspaceRepository.updateNotes(
+                tab = tab,
+                text = workspaceNotesText
+            )
         }
     }
 
@@ -962,11 +991,8 @@ private fun CarrotPdfContent(
                 ) {
                     FloatingAnnotationButton(
                         onClick = {
-                            Toast.makeText(
-                                context,
-                                "Annotations will come later.",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            isWorkspaceOpen = true
+                            isChromeVisible = true
                         }
                     )
                 }
@@ -1057,6 +1083,20 @@ private fun CarrotPdfContent(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+            }
+
+            if (
+                isWorkspaceOpen &&
+                activeTab != null &&
+                !isCapturingScreenshot
+            ) {
+                NotesWorkspaceSheet(
+                    notesText = workspaceNotesText,
+                    onNotesChange = { text ->
+                        workspaceNotesText = text
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
             }
 
             if (isTabSwitcherOpen) {
@@ -1378,4 +1418,5 @@ const val PAGE_INDICATOR_VISIBLE_MS = 1200L
 const val TAB_REORDER_HOLD_MS = 180L
 const val DOCUMENT_LOAD_TIMEOUT_MS = 12_000L
 const val SCREENSHOT_CAPTURE_DELAY_MS = 120L
+const val WORKSPACE_SAVE_DEBOUNCE_MS = 450L
 

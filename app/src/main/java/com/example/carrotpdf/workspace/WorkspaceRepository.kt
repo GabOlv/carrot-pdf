@@ -34,6 +34,29 @@ class WorkspaceRepository(
         }
     }
 
+    fun updateNotes(
+        tab: PdfTab,
+        text: String
+    ): CarrotWorkspace {
+        val now = System.currentTimeMillis()
+        val workspace = loadOrCreate(tab)
+
+        if (workspace.notes.text == text) {
+            return workspace
+        }
+
+        val updated = workspace.copy(
+            notes = WorkspaceNotes(
+                text = text,
+                updatedAt = now
+            ),
+            updatedAt = now
+        )
+
+        save(updated)
+        return updated
+    }
+
     fun load(tabId: String): CarrotWorkspace? {
         val file = workspaceFile(tabId)
 
