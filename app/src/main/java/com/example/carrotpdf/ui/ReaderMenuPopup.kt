@@ -116,7 +116,7 @@ fun ReaderMenuPopup(
     hasDocument: Boolean,
     onOpenPdf: () -> Unit,
     onOpenImages: () -> Unit,
-    onGoToPage: () -> Unit,
+    onExportData: () -> Unit,
     onSharePdf: () -> Unit,
     onDownloadPdf: () -> Unit,
     onPrintPdf: () -> Unit,
@@ -162,9 +162,9 @@ fun ReaderMenuPopup(
                 onClick = onOpenImages
             )
             MenuAction(
-                text = "Ir para Pagina...",
-                icon = MenuIcon.PageNumber,
-                onClick = onGoToPage,
+                text = "Exportar Dados...",
+                icon = MenuIcon.Download,
+                onClick = onExportData,
                 enabled = hasDocument
             )
             MenuDivider()

@@ -124,7 +124,9 @@ import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import com.example.carrotpdf.workspace.CanvasInkStroke
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.WorkspaceCanvas
 import com.example.carrotpdf.workspace.WorkspaceRepository
+import com.example.carrotpdf.workspace.exportWorkspaceData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -185,6 +187,7 @@ private fun CarrotPdfContent(
     var isLoadingDocument by remember { mutableStateOf(false) }
     var isCreatingImagePdf by remember { mutableStateOf(false) }
     var isExportingAnnotatedPdf by remember { mutableStateOf(false) }
+    var isExportingWorkspaceData by remember { mutableStateOf(false) }
     var hasRestoredPersistedTabs by remember { mutableStateOf(false) }
     var selectedExternalLink by remember { mutableStateOf<String?>(null) }
     var selectedTextSelection by remember { mutableStateOf<PdfTextSelection?>(null) }
@@ -405,6 +408,25 @@ private fun CarrotPdfContent(
             null
         } finally {
             isExportingAnnotatedPdf = false
+        }
+    }
+
+    suspend fun exportCurrentWorkspaceData(tab: PdfTab): Boolean {
+        isExportingWorkspaceData = true
+
+        return try {
+            withContext(Dispatchers.IO) {
+                exportWorkspaceData(
+                    context = context.applicationContext,
+                    title = tab.title,
+                    notesText = workspaceNotesText,
+                    canvas = WorkspaceCanvas(
+                        strokes = workspaceCanvasStrokes
+                    )
+                ).success
+            }
+        } finally {
+            isExportingWorkspaceData = false
         }
     }
 
@@ -1264,13 +1286,24 @@ private fun CarrotPdfContent(
                         isOverflowOpen = false
                         openImages()
                     },
-                    onGoToPage = {
-                        isOverflowOpen = false
-                        Toast.makeText(
-                            context,
-                            "Go to page will come next.",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                    onExportData = {
+                        val tab = activeTab
+
+                        if (tab != null) {
+                            isOverflowOpen = false
+                            coroutineScope.launch {
+                                val success = exportCurrentWorkspaceData(tab)
+                                Toast.makeText(
+                                    context,
+                                    if (success) {
+                                        "PDF data exported"
+                                    } else {
+                                        "Could not export PDF data"
+                                    },
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     },
                     onSharePdf = {
                         val tab = activeTab
@@ -1357,6 +1390,22 @@ private fun CarrotPdfContent(
                 ) {
                     Text(
                         text = "Preparing PDF...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            if (isExportingWorkspaceData) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.42f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Exporting PDF data...",
                         color = Color.White,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold
