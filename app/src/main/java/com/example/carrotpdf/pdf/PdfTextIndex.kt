@@ -97,6 +97,30 @@ internal class PdfTextIndexSession(
         )
     }
 
+    suspend fun markerSelectionsForPoints(
+        pageIndex: Int,
+        points: List<Pair<Float, Float>>
+    ): List<PdfTextSelection> {
+        val page = pages().getOrNull(pageIndex) ?: return emptyList()
+        val seenRanges = mutableSetOf<String>()
+
+        return points.mapNotNull { (normalizedX, normalizedY) ->
+            val selection = page.wordAt(
+                normalizedX = normalizedX,
+                normalizedY = normalizedY
+            ) ?: return@mapNotNull null
+            val key = selection.pageRanges.joinToString(separator = "|") { range ->
+                "${range.pageIndex}:${range.startIndex}:${range.endExclusive}"
+            }
+
+            if (seenRanges.add(key)) {
+                selection
+            } else {
+                null
+            }
+        }
+    }
+
     suspend fun pages(): List<PdfTextIndexedPage> {
         cachedPages?.let { pages ->
             return pages

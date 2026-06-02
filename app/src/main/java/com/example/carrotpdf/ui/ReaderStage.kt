@@ -112,6 +112,7 @@ import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.PageTextMarker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -130,7 +131,9 @@ fun ReaderStage(
     suppressPageOverlays: Boolean,
     pageSizes: List<PdfPageSize>,
     pageInkStrokes: List<PageInkStroke>,
+    pageTextMarkers: List<PageTextMarker>,
     isPdfInkActive: Boolean,
+    isPdfMarkerActive: Boolean,
     pdfInkTool: InkTool,
     pdfInkColor: Long,
     pdfInkWidth: Float,
@@ -149,6 +152,7 @@ fun ReaderStage(
     onLinkTap: (PdfLinkRegion) -> Unit,
     onPdfInkStroke: (PageInkStroke) -> Unit,
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
+    onPdfTextMarkerGesture: (pageIndex: Int, points: List<InkPoint>) -> Unit,
     onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
@@ -212,13 +216,16 @@ fun ReaderStage(
                     suppressPageOverlays = suppressPageOverlays,
                     pageSizes = pageSizes,
                     pageInkStrokes = pageInkStrokes,
+                    pageTextMarkers = pageTextMarkers,
                     isPdfInkActive = isPdfInkActive,
+                    isPdfMarkerActive = isPdfMarkerActive,
                     pdfInkTool = pdfInkTool,
                     pdfInkColor = pdfInkColor,
                     pdfInkWidth = pdfInkWidth,
                     onLinkTap = onLinkTap,
                     onPdfInkStroke = onPdfInkStroke,
                     onPdfInkErase = onPdfInkErase,
+                    onPdfTextMarkerGesture = onPdfTextMarkerGesture,
                     onTextLongPress = onTextLongPress,
                     onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                     onUserInteraction = onUserInteraction,

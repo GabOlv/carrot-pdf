@@ -6,12 +6,15 @@ import androidx.core.content.FileProvider
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.PageTextMarker
+import com.example.carrotpdf.workspace.PageTextMarkerBounds
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.min
@@ -25,9 +28,10 @@ fun createAnnotatedPdfExport(
     context: Context,
     sourceUri: Uri,
     title: String,
-    pageInkStrokes: List<PageInkStroke>
+    pageInkStrokes: List<PageInkStroke>,
+    textMarkers: List<PageTextMarker> = emptyList()
 ): Result<AnnotatedPdfExport> = runCatching {
-    require(pageInkStrokes.isNotEmpty()) { "No PDF annotations to export." }
+    require(pageInkStrokes.isNotEmpty() || textMarkers.isNotEmpty()) { "No PDF annotations to export." }
 
     PDFBoxResourceLoader.init(context.applicationContext)
 
@@ -41,14 +45,18 @@ fun createAnnotatedPdfExport(
     val strokesByPage = pageInkStrokes
         .filter { stroke -> stroke.tool == InkTool.Pen && stroke.points.isNotEmpty() }
         .groupBy { stroke -> stroke.pageIndex }
+    val markersByPage = textMarkers
+        .filter { marker -> marker.bounds.isNotEmpty() }
+        .groupBy { marker -> marker.pageIndex }
 
     context.contentResolver.openInputStream(sourceUri)?.use { input ->
         PDDocument.load(input).use { document ->
-            strokesByPage.forEach { (pageIndex, strokes) ->
+            (strokesByPage.keys + markersByPage.keys).forEach { pageIndex ->
                 if (pageIndex in 0 until document.numberOfPages) {
-                    document.getPage(pageIndex).appendInkStrokes(
+                    document.getPage(pageIndex).appendAnnotations(
                         document = document,
-                        strokes = strokes
+                        strokes = strokesByPage[pageIndex].orEmpty(),
+                        markers = markersByPage[pageIndex].orEmpty()
                     )
                 }
             }
@@ -69,9 +77,10 @@ fun createAnnotatedPdfExport(
     )
 }
 
-private fun PDPage.appendInkStrokes(
+private fun PDPage.appendAnnotations(
     document: PDDocument,
-    strokes: List<PageInkStroke>
+    strokes: List<PageInkStroke>,
+    markers: List<PageTextMarker>
 ) {
     if (rotation != 0) {
         return
@@ -92,6 +101,13 @@ private fun PDPage.appendInkStrokes(
     )
 
     try {
+        markers.forEach { marker ->
+            contentStream.drawTextMarker(
+                marker = marker,
+                pageBox = pageBox
+            )
+        }
+
         strokes.forEach { stroke ->
             contentStream.drawInkStroke(
                 stroke = stroke,
@@ -101,6 +117,37 @@ private fun PDPage.appendInkStrokes(
     } finally {
         contentStream.close()
     }
+}
+
+private fun PDPageContentStream.drawTextMarker(
+    marker: PageTextMarker,
+    pageBox: PDRectangle
+) {
+    val color = marker.color.toPdfRgb()
+    val graphicsState = PDExtendedGraphicsState().apply {
+        nonStrokingAlphaConstant = PDF_MARKER_ALPHA
+    }
+
+    saveGraphicsState()
+    setGraphicsStateParameters(graphicsState)
+    setNonStrokingColor(
+        color.red / 255f,
+        color.green / 255f,
+        color.blue / 255f
+    )
+
+    marker.bounds.forEach { bound ->
+        val rect = bound.toPdfRect(pageBox) ?: return@forEach
+        addRect(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height
+        )
+        fill()
+    }
+
+    restoreGraphicsState()
 }
 
 private fun PDPageContentStream.drawInkStroke(
@@ -143,6 +190,35 @@ private fun PDPageContentStream.drawInkStroke(
     }
 
     stroke()
+}
+
+private fun PageTextMarkerBounds.toPdfRect(
+    pageBox: PDRectangle
+): PdfRect? {
+    if (
+        pageWidth <= 0f ||
+        pageHeight <= 0f ||
+        right <= left ||
+        bottom <= top
+    ) {
+        return null
+    }
+
+    val x = pageBox.lowerLeftX + (left / pageWidth) * pageBox.width
+    val y = pageBox.lowerLeftY + (1f - bottom / pageHeight) * pageBox.height
+    val width = ((right - left) / pageWidth) * pageBox.width
+    val height = ((bottom - top) / pageHeight) * pageBox.height
+
+    if (width <= 0f || height <= 0f) {
+        return null
+    }
+
+    return PdfRect(
+        x = x,
+        y = y,
+        width = width,
+        height = height
+    )
 }
 
 private fun InkPoint.toPdfPoint(
@@ -210,6 +286,13 @@ private data class PdfPoint(
     val y: Float
 )
 
+private data class PdfRect(
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float
+)
+
 private data class PdfRgb(
     val red: Int,
     val green: Int,
@@ -217,6 +300,7 @@ private data class PdfRgb(
 )
 
 private const val ANNOTATED_PDF_DIRECTORY = "generated_pdfs"
+private const val PDF_MARKER_ALPHA = 0.28f
 private const val MIN_INK_STROKE_WIDTH_PT = 0.75f
 private const val MAX_INK_STROKE_WIDTH_PT = 18f
 private const val PDF_ROUND_LINE_CAP = 1

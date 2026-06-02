@@ -79,6 +79,7 @@ enum class WorkspaceSheetLayout {
 
 enum class WorkspaceDrawTool {
     Pen,
+    Marker,
     Move,
     Eraser
 }
@@ -430,7 +431,7 @@ private fun FreeDrawCanvas(
                 .pointerInput(selectedTool) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        var gestureStrokePoints = if (selectedTool == WorkspaceDrawTool.Pen) {
+                        var gestureStrokePoints = if (selectedTool == WorkspaceDrawTool.Pen || selectedTool == WorkspaceDrawTool.Marker) {
                             listOf(screenToCanvas(down.position))
                         } else {
                             emptyList()
@@ -453,13 +454,17 @@ private fun FreeDrawCanvas(
                             if (pressedChanges.isEmpty()) {
                                 if (
                                     !isTransforming &&
-                                    selectedTool == WorkspaceDrawTool.Pen &&
+                                    (selectedTool == WorkspaceDrawTool.Pen || selectedTool == WorkspaceDrawTool.Marker) &&
                                     gestureStrokePoints.size > 1
                                 ) {
                                     latestOnStrokesChange(
                                         latestStrokes + CanvasInkStroke(
                                             id = UUID.randomUUID().toString(),
-                                            tool = InkTool.Pen,
+                                            tool = if (selectedTool == WorkspaceDrawTool.Marker) {
+                                                InkTool.Highlighter
+                                            } else {
+                                                InkTool.Pen
+                                            },
                                             color = latestSelectedColor,
                                             width = latestSelectedStrokeWidth,
                                             points = gestureStrokePoints
@@ -610,6 +615,14 @@ private fun DrawControlHeader(
             selected = selectedTool == WorkspaceDrawTool.Pen,
             onClick = {
                 onToolChange(WorkspaceDrawTool.Pen)
+            }
+        )
+
+        CompactDrawToolButton(
+            tool = WorkspaceDrawTool.Marker,
+            selected = selectedTool == WorkspaceDrawTool.Marker,
+            onClick = {
+                onToolChange(WorkspaceDrawTool.Marker)
             }
         )
 
@@ -856,6 +869,7 @@ private fun DrawToolButton(
         Text(
             text = when (tool) {
                 WorkspaceDrawTool.Pen -> "Pen"
+                WorkspaceDrawTool.Marker -> "Marker"
                 WorkspaceDrawTool.Move -> "Move"
                 WorkspaceDrawTool.Eraser -> "Eraser"
             },
@@ -1322,6 +1336,30 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawToolIcon(
                 color = color,
                 start = Offset(5.dp.toPx(), 18.dp.toPx()),
                 end = Offset(10.dp.toPx(), 17.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+
+        WorkspaceDrawTool.Marker -> {
+            drawLine(
+                color = color,
+                start = Offset(5.dp.toPx(), 15.dp.toPx()),
+                end = Offset(16.dp.toPx(), 7.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(7.dp.toPx(), 18.dp.toPx()),
+                end = Offset(18.dp.toPx(), 10.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(4.dp.toPx(), 18.dp.toPx()),
+                end = Offset(12.dp.toPx(), 18.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )

@@ -100,6 +100,26 @@ class WorkspaceRepository(
         return updated
     }
 
+    fun updateTextMarkers(
+        tab: PdfTab,
+        markers: List<PageTextMarker>
+    ): CarrotWorkspace {
+        val now = System.currentTimeMillis()
+        val workspace = loadOrCreate(tab)
+
+        if (workspace.textMarkers == markers) {
+            return workspace
+        }
+
+        val updated = workspace.copy(
+            textMarkers = markers,
+            updatedAt = now
+        )
+
+        save(updated)
+        return updated
+    }
+
     fun load(tabId: String): CarrotWorkspace? {
         val file = workspaceFile(tabId)
 

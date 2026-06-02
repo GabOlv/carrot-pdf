@@ -10,6 +10,7 @@ data class CarrotWorkspace(
     val notes: WorkspaceNotes = WorkspaceNotes(),
     val canvas: WorkspaceCanvas = WorkspaceCanvas(),
     val pageInk: List<PageInkStroke> = emptyList(),
+    val textMarkers: List<PageTextMarker> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = createdAt
 ) {
@@ -52,6 +53,24 @@ data class PageInkStroke(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+data class PageTextMarker(
+    val id: String,
+    val pageIndex: Int,
+    val text: String,
+    val color: Long,
+    val bounds: List<PageTextMarkerBounds>,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class PageTextMarkerBounds(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val pageWidth: Float,
+    val pageHeight: Float
+)
+
 data class CanvasInkStroke(
     val id: String,
     val tool: InkTool,
@@ -87,6 +106,9 @@ internal fun CarrotWorkspace.toJson(): JSONObject {
         .put("pageInk", JSONArray().also { array ->
             pageInk.forEach { stroke -> array.put(stroke.toJson()) }
         })
+        .put("textMarkers", JSONArray().also { array ->
+            textMarkers.forEach { marker -> array.put(marker.toJson()) }
+        })
         .put("createdAt", createdAt)
         .put("updatedAt", updatedAt)
 }
@@ -99,6 +121,7 @@ internal fun workspaceFromJson(json: JSONObject): CarrotWorkspace {
         notes = notesFromJson(json.optJSONObject("notes")),
         canvas = canvasFromJson(json.optJSONObject("canvas")),
         pageInk = pageInkFromJson(json.optJSONArray("pageInk")),
+        textMarkers = textMarkersFromJson(json.optJSONArray("textMarkers")),
         createdAt = json.optLong("createdAt", System.currentTimeMillis()),
         updatedAt = json.optLong("updatedAt", 0L)
     )
@@ -163,6 +186,28 @@ private fun CanvasInkStroke.toJson(): JSONObject {
         .put("width", width.toDouble())
         .put("createdAt", createdAt)
         .put("points", points.toJson())
+}
+
+private fun PageTextMarker.toJson(): JSONObject {
+    return JSONObject()
+        .put("id", id)
+        .put("pageIndex", pageIndex)
+        .put("text", text)
+        .put("color", color)
+        .put("createdAt", createdAt)
+        .put("bounds", JSONArray().also { array ->
+            bounds.forEach { bound -> array.put(bound.toJson()) }
+        })
+}
+
+private fun PageTextMarkerBounds.toJson(): JSONObject {
+    return JSONObject()
+        .put("left", left.toDouble())
+        .put("top", top.toDouble())
+        .put("right", right.toDouble())
+        .put("bottom", bottom.toDouble())
+        .put("pageWidth", pageWidth.toDouble())
+        .put("pageHeight", pageHeight.toDouble())
 }
 
 private fun List<InkPoint>.toJson(): JSONArray {
@@ -232,6 +277,68 @@ private fun canvasInkFromJson(array: JSONArray?): List<CanvasInkStroke> {
     }
 }
 
+private fun textMarkersFromJson(array: JSONArray?): List<PageTextMarker> {
+    if (array == null) {
+        return emptyList()
+    }
+
+    return buildList {
+        repeat(array.length()) { index ->
+            val item = array.optJSONObject(index) ?: return@repeat
+            val id = item.optString("id").takeIf { it.isNotBlank() } ?: return@repeat
+            val pageIndex = item.optInt("pageIndex", -1)
+
+            if (pageIndex < 0) {
+                return@repeat
+            }
+
+            add(
+                PageTextMarker(
+                    id = id,
+                    pageIndex = pageIndex,
+                    text = item.optString("text"),
+                    color = item.optLong("color", DEFAULT_MARKER_COLOR),
+                    bounds = markerBoundsFromJson(item.optJSONArray("bounds")),
+                    createdAt = item.optLong("createdAt", 0L)
+                )
+            )
+        }
+    }
+}
+
+private fun markerBoundsFromJson(array: JSONArray?): List<PageTextMarkerBounds> {
+    if (array == null) {
+        return emptyList()
+    }
+
+    return buildList {
+        repeat(array.length()) { index ->
+            val item = array.optJSONObject(index) ?: return@repeat
+            val pageWidth = item.optDouble("pageWidth", 0.0).toFloat()
+            val pageHeight = item.optDouble("pageHeight", 0.0).toFloat()
+            val left = item.optDouble("left", 0.0).toFloat()
+            val top = item.optDouble("top", 0.0).toFloat()
+            val right = item.optDouble("right", 0.0).toFloat()
+            val bottom = item.optDouble("bottom", 0.0).toFloat()
+
+            if (pageWidth <= 0f || pageHeight <= 0f || right <= left || bottom <= top) {
+                return@repeat
+            }
+
+            add(
+                PageTextMarkerBounds(
+                    left = left,
+                    top = top,
+                    right = right,
+                    bottom = bottom,
+                    pageWidth = pageWidth,
+                    pageHeight = pageHeight
+                )
+            )
+        }
+    }
+}
+
 private fun pointsFromJson(array: JSONArray?): List<InkPoint> {
     if (array == null) {
         return emptyList()
@@ -257,4 +364,5 @@ private fun inkToolFromJson(raw: String): InkTool {
 
 private const val WORKSPACE_SCHEMA_VERSION = 1
 private const val DEFAULT_INK_COLOR = 0xFFFF5A10
+private const val DEFAULT_MARKER_COLOR = 0xFFFFD966
 private const val DEFAULT_INK_WIDTH = 4f

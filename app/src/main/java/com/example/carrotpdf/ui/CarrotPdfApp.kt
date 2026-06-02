@@ -128,6 +128,8 @@ import com.example.carrotpdf.workspace.CanvasInkStroke
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.PageTextMarker
+import com.example.carrotpdf.workspace.PageTextMarkerBounds
 import com.example.carrotpdf.workspace.WorkspaceCanvas
 import com.example.carrotpdf.workspace.WorkspaceRepository
 import com.example.carrotpdf.workspace.exportWorkspaceData
@@ -136,6 +138,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -209,13 +212,20 @@ private fun CarrotPdfContent(
     var workspaceNotesText by remember { mutableStateOf("") }
     var workspaceCanvasStrokes by remember { mutableStateOf<List<CanvasInkStroke>>(emptyList()) }
     var workspacePageInkStrokes by remember { mutableStateOf<List<PageInkStroke>>(emptyList()) }
+    var workspaceTextMarkers by remember { mutableStateOf<List<PageTextMarker>>(emptyList()) }
     var loadedWorkspaceTabId by remember { mutableStateOf<String?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val isPdfInkActive = isWorkspaceOpen &&
         workspaceMode == WorkspaceMode.Draw &&
         workspaceDrawTarget == DrawTarget.Pdf &&
-        workspaceDrawTool != WorkspaceDrawTool.Move &&
+        (workspaceDrawTool == WorkspaceDrawTool.Pen || workspaceDrawTool == WorkspaceDrawTool.Eraser) &&
+        activeTab != null &&
+        !activeTab.isMissing
+    val isPdfMarkerActive = isWorkspaceOpen &&
+        workspaceMode == WorkspaceMode.Draw &&
+        workspaceDrawTarget == DrawTarget.Pdf &&
+        workspaceDrawTool == WorkspaceDrawTool.Marker &&
         activeTab != null &&
         !activeTab.isMissing
     val activePdfInkTool = if (workspaceDrawTool == WorkspaceDrawTool.Eraser) {
@@ -397,8 +407,9 @@ private fun CarrotPdfContent(
 
     suspend fun exportablePdfUri(tab: PdfTab): Uri? {
         val pageInk = workspacePageInkStrokes
+        val textMarkers = workspaceTextMarkers
 
-        if (pageInk.isEmpty()) {
+        if (pageInk.isEmpty() && textMarkers.isEmpty()) {
             return tab.uri
         }
 
@@ -410,7 +421,8 @@ private fun CarrotPdfContent(
                     context = context.applicationContext,
                     sourceUri = tab.uri,
                     title = tab.title,
-                    pageInkStrokes = pageInk
+                    pageInkStrokes = pageInk,
+                    textMarkers = textMarkers
                 ).getOrThrow().uri
             }
         } catch (_: Throwable) {
@@ -636,6 +648,7 @@ private fun CarrotPdfContent(
         workspaceNotesText = ""
         workspaceCanvasStrokes = emptyList()
         workspacePageInkStrokes = emptyList()
+        workspaceTextMarkers = emptyList()
 
         val tab = activeTab ?: return@LaunchedEffect
 
@@ -645,6 +658,7 @@ private fun CarrotPdfContent(
                 workspaceNotesText = workspace.notes.text
                 workspaceCanvasStrokes = workspace.canvas.strokes
                 workspacePageInkStrokes = workspace.pageInk
+                workspaceTextMarkers = workspace.textMarkers
                 loadedWorkspaceTabId = tab.id
             }
         }
@@ -759,6 +773,23 @@ private fun CarrotPdfContent(
         }
     }
 
+    LaunchedEffect(activeTab?.id, loadedWorkspaceTabId, workspaceTextMarkers) {
+        val tab = activeTab ?: return@LaunchedEffect
+
+        if (loadedWorkspaceTabId != tab.id) {
+            return@LaunchedEffect
+        }
+
+        delay(WORKSPACE_SAVE_DEBOUNCE_MS)
+
+        withContext(Dispatchers.IO) {
+            workspaceRepository.updateTextMarkers(
+                tab = tab,
+                markers = workspaceTextMarkers
+            )
+        }
+    }
+
     LaunchedEffect(activeTab?.id, activeLinkSession) {
         linkRegions.clear()
         selectedExternalLink = null
@@ -832,7 +863,9 @@ private fun CarrotPdfContent(
                 suppressPageOverlays = isCapturingScreenshot,
                 pageSizes = activeTab?.pageSizes.orEmpty(),
                 pageInkStrokes = workspacePageInkStrokes,
+                pageTextMarkers = workspaceTextMarkers,
                 isPdfInkActive = isPdfInkActive,
+                isPdfMarkerActive = isPdfMarkerActive,
                 pdfInkTool = activePdfInkTool,
                 pdfInkColor = workspaceInkColor,
                 pdfInkWidth = activePdfInkWidth,
@@ -908,6 +941,36 @@ private fun CarrotPdfContent(
                         pageIndex = pageIndex,
                         erasePoints = points
                     )
+                    workspaceTextMarkers = workspaceTextMarkers.eraseTextMarkers(
+                        pageIndex = pageIndex,
+                        erasePoints = points
+                    )
+                },
+                onPdfTextMarkerGesture = { pageIndex, points ->
+                    val session = activeTextIndexSession ?: return@ReaderStage
+                    val tabId = activeTabId
+
+                    selectedExternalLink = null
+                    selectedTextSelection = null
+                    coroutineScope.launch {
+                        val markers = withContext(Dispatchers.IO) {
+                            runCatching {
+                                session.markerSelectionsForPoints(
+                                    pageIndex = pageIndex,
+                                    points = points.map { point -> point.x to point.y }
+                                ).map { selection ->
+                                    selection.toPageTextMarker(
+                                        color = workspaceInkColor
+                                    )
+                                }
+                            }.getOrDefault(emptyList())
+                        }
+
+                        if (activeTabId == tabId && markers.isNotEmpty()) {
+                            workspaceTextMarkers = (workspaceTextMarkers + markers)
+                                .distinctBy { marker -> marker.stableMarkerKey() }
+                        }
+                    }
                 },
                 onTextLongPress = { pageIndex, normalizedX, normalizedY ->
                     val session = activeTextIndexSession ?: return@ReaderStage
@@ -1533,6 +1596,79 @@ private fun List<PageInkStroke>.erasePageInkStrokes(
     }
 }
 
+private fun PdfTextSelection.toPageTextMarker(
+    color: Long
+): PageTextMarker {
+    return PageTextMarker(
+        id = UUID.randomUUID().toString(),
+        pageIndex = pageIndex,
+        text = text,
+        color = color,
+        bounds = bounds.map { bound ->
+            PageTextMarkerBounds(
+                left = bound.left,
+                top = bound.top,
+                right = bound.right,
+                bottom = bound.bottom,
+                pageWidth = bound.pageWidth,
+                pageHeight = bound.pageHeight
+            )
+        }
+    )
+}
+
+private fun PageTextMarker.stableMarkerKey(): String {
+    val boundsKey = bounds.joinToString(separator = "|") { bound ->
+        "${bound.left.roundMarkerCoord()}:${bound.top.roundMarkerCoord()}:" +
+            "${bound.right.roundMarkerCoord()}:${bound.bottom.roundMarkerCoord()}"
+    }
+
+    return "$pageIndex:$text:$boundsKey"
+}
+
+private fun Float.roundMarkerCoord(): Int {
+    return (this * 10f).toInt()
+}
+
+private fun List<PageTextMarker>.eraseTextMarkers(
+    pageIndex: Int,
+    erasePoints: List<InkPoint>
+): List<PageTextMarker> {
+    if (erasePoints.isEmpty()) {
+        return this
+    }
+
+    return filterNot { marker ->
+        marker.pageIndex == pageIndex &&
+            marker.bounds.any { bound ->
+                erasePoints.any { point ->
+                    bound.containsNormalizedPoint(
+                        x = point.x,
+                        y = point.y,
+                        padding = TEXT_MARKER_ERASER_PADDING
+                    )
+                }
+            }
+    }
+}
+
+private fun PageTextMarkerBounds.containsNormalizedPoint(
+    x: Float,
+    y: Float,
+    padding: Float
+): Boolean {
+    if (pageWidth <= 0f || pageHeight <= 0f) {
+        return false
+    }
+
+    val leftNorm = (left / pageWidth - padding).coerceAtLeast(0f)
+    val topNorm = (top / pageHeight - padding).coerceAtLeast(0f)
+    val rightNorm = (right / pageWidth + padding).coerceAtMost(1f)
+    val bottomNorm = (bottom / pageHeight + padding).coerceAtMost(1f)
+
+    return x in leftNorm..rightNorm && y in topNorm..bottomNorm
+}
+
 private fun List<InkPoint>.isNearPageInkPath(
     testPoints: List<InkPoint>,
     radius: Float
@@ -1766,6 +1902,7 @@ const val WORKSPACE_SAVE_DEBOUNCE_MS = 450L
 const val DEFAULT_WORKSPACE_INK_COLOR = 0xFFFF7A1AL
 const val DEFAULT_WORKSPACE_STROKE_WIDTH = 34f
 const val PDF_INK_WIDTH_DENOMINATOR = 7000f
+const val TEXT_MARKER_ERASER_PADDING = 0.018f
 val WORKSPACE_DEFAULT_HEIGHT = 326.dp
 val WORKSPACE_PDF_DRAW_HEIGHT = 226.dp
 val TABLET_WORKSPACE_BREAKPOINT = 700.dp
