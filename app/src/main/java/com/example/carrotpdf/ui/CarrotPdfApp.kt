@@ -118,6 +118,7 @@ import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
 import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
+import com.example.carrotpdf.workspace.WorkspaceRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -154,6 +155,9 @@ private fun CarrotPdfContent(
     val view = LocalView.current
     val activity = remember(context) { context.findActivity() }
     val coroutineScope = rememberCoroutineScope()
+    val workspaceRepository = remember(context) {
+        WorkspaceRepository(context.applicationContext)
+    }
     val statusBarTop = WindowInsets.statusBars
         .asPaddingValues()
         .calculateTopPadding()
@@ -262,6 +266,11 @@ private fun CarrotPdfContent(
             activeTabId = tab.id
         }
 
+        tabs.firstOrNull { tab -> tab.id == activeTabId }?.let { tab ->
+            coroutineScope.launch(Dispatchers.IO) {
+                workspaceRepository.loadOrCreate(tab)
+            }
+        }
         closeSearch()
         isChromeVisible = true
         persistTabsNow()
@@ -287,6 +296,11 @@ private fun CarrotPdfContent(
         }
 
         activeTabId = tabId
+        tabs.firstOrNull { tab -> tab.id == tabId }?.let { tab ->
+            coroutineScope.launch(Dispatchers.IO) {
+                workspaceRepository.loadOrCreate(tab)
+            }
+        }
         closeSearch()
         isChromeVisible = true
         persistTabsNow()
@@ -496,6 +510,10 @@ private fun CarrotPdfContent(
             activeTabId = restoredActiveTabId
         }
 
+        withContext(Dispatchers.IO) {
+            workspaceRepository.ensureWorkspaces(restoredTabsWithMissingState)
+        }
+
         if (restoredTabsWithMissingState != restoredTabs.tabs) {
             PdfTabPersistence.save(
                 context = context.applicationContext,
@@ -526,6 +544,10 @@ private fun CarrotPdfContent(
         currentPaperBoundsInWindow = null
 
         val tab = activeTab ?: return@LaunchedEffect
+
+        withContext(Dispatchers.IO) {
+            workspaceRepository.loadOrCreate(tab)
+        }
 
         if (tab.isMissing) {
             isLoadingDocument = false
