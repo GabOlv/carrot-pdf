@@ -145,7 +145,8 @@ fun ReaderStage(
     onUserInteraction: () -> Unit,
     onCurrentPageChange: (Int) -> Unit,
     onZoomCommitted: (Float) -> Unit,
-    onViewportOriginChange: (leftPx: Float, topPx: Float) -> Unit
+    onViewportOriginChange: (leftPx: Float, topPx: Float) -> Unit,
+    onCurrentPageBoundsChange: (androidx.compose.ui.geometry.Rect) -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -188,6 +189,7 @@ fun ReaderStage(
                     onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                     onUserInteraction = onUserInteraction,
                     onViewportOriginChange = onViewportOriginChange,
+                    onCurrentPageBoundsChange = onCurrentPageBoundsChange,
                     pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                         pageIndicatorContent(
                             currentPage,

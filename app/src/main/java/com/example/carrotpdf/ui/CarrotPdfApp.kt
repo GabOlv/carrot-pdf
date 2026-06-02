@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -68,6 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -122,6 +124,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
 
 @Composable
 fun CarrotPdfApp(
@@ -172,6 +178,8 @@ private fun CarrotPdfContent(
     var selectedExternalLink by remember { mutableStateOf<String?>(null) }
     var selectedTextSelection by remember { mutableStateOf<PdfTextSelection?>(null) }
     var textSelectionDragGeneration by remember { mutableIntStateOf(0) }
+    var isCapturingScreenshot by remember { mutableStateOf(false) }
+    var currentPaperBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val activeViewerState = rememberActiveViewerState(activeTab)
@@ -462,6 +470,7 @@ private fun CarrotPdfContent(
         linkRegions.clear()
         selectedExternalLink = null
         selectedTextSelection = null
+        currentPaperBoundsInWindow = null
 
         val tab = activeTab ?: return@LaunchedEffect
 
@@ -727,11 +736,17 @@ private fun CarrotPdfContent(
                             )
                         }
                     }
+                },
+                onCurrentPageBoundsChange = { bounds ->
+                    currentPaperBoundsInWindow = bounds
                 }
             )
 
             AnimatedVisibility(
-                visible = isChromeVisible && !isSearchVisible && selectedTextSelection == null,
+                visible = isChromeVisible &&
+                    !isSearchVisible &&
+                    selectedTextSelection == null &&
+                    !isCapturingScreenshot,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter)
@@ -760,7 +775,9 @@ private fun CarrotPdfContent(
             }
 
             AnimatedVisibility(
-                visible = isSearchVisible && selectedTextSelection == null,
+                visible = isSearchVisible &&
+                    selectedTextSelection == null &&
+                    !isCapturingScreenshot,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
@@ -811,32 +828,35 @@ private fun CarrotPdfContent(
             }
 
             selectedTextSelection?.let { selection ->
-                ReaderTextSelectionBar(
-                    selectedText = selection.text,
-                    onBack = {
-                        selectedTextSelection = null
-                    },
-                    onCopy = {
-                        copyTextToClipboard(
-                            context = context,
-                            label = "PDF text",
-                            text = selection.text
-                        )
-                        Toast.makeText(
-                            context,
-                            "Text copied",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        selectedTextSelection = null
-                    },
-                    modifier = Modifier.align(Alignment.TopCenter)
-                )
+                if (!isCapturingScreenshot) {
+                    ReaderTextSelectionBar(
+                        selectedText = selection.text,
+                        onBack = {
+                            selectedTextSelection = null
+                        },
+                        onCopy = {
+                            copyTextToClipboard(
+                                context = context,
+                                label = "PDF text",
+                                text = selection.text
+                            )
+                            Toast.makeText(
+                                context,
+                                "Text copied",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            selectedTextSelection = null
+                        },
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
             }
 
             AnimatedVisibility(
                 visible = (isChromeVisible || isSearchVisible) &&
                     activeTab != null &&
-                    selectedTextSelection == null,
+                    selectedTextSelection == null &&
+                    !isCapturingScreenshot,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
@@ -860,13 +880,14 @@ private fun CarrotPdfContent(
             AnimatedVisibility(
                 visible = (isChromeVisible || isSearchVisible) &&
                     activeTab != null &&
-                    selectedTextSelection == null,
+                    selectedTextSelection == null &&
+                    !isCapturingScreenshot,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(
-                        start = 18.dp,
+                        start = 24.dp,
                         bottom = navigationBarBottom + 18.dp
                     )
             ) {
@@ -876,6 +897,7 @@ private fun CarrotPdfContent(
 
                         if (tab != null) {
                             coroutineScope.launch {
+                                isCapturingScreenshot = true
                                 isChromeVisible = false
                                 isOverflowOpen = false
                                 isTabSwitcherOpen = false
@@ -885,13 +907,22 @@ private fun CarrotPdfContent(
                                 val bitmap = runCatching {
                                     view.drawToBitmap()
                                 }.getOrNull()
-                                val saved = bitmap != null && withContext(Dispatchers.IO) {
+                                val croppedBitmap = bitmap?.let { source ->
+                                    cropBitmapToWindowBounds(
+                                        source = source,
+                                        view = view,
+                                        boundsInWindow = currentPaperBoundsInWindow
+                                    )
+                                }
+                                val saved = croppedBitmap != null && withContext(Dispatchers.IO) {
                                     saveScreenshot(
                                         context = context.applicationContext,
-                                        bitmap = bitmap,
+                                        bitmap = croppedBitmap,
                                         title = tab.title
                                     )
                                 }
+
+                                isCapturingScreenshot = false
 
                                 Toast.makeText(
                                     context,
@@ -1118,6 +1149,41 @@ private fun canReadPdfUri(
             true
         } ?: false
     }.getOrDefault(false)
+}
+
+private fun cropBitmapToWindowBounds(
+    source: Bitmap,
+    view: android.view.View,
+    boundsInWindow: Rect?
+): Bitmap? {
+    if (boundsInWindow == null || source.width <= 0 || source.height <= 0) {
+        return source
+    }
+
+    val viewLocation = IntArray(2)
+    view.getLocationInWindow(viewLocation)
+
+    val left = floor(boundsInWindow.left - viewLocation[0]).toInt().coerceIn(0, source.width)
+    val top = floor(boundsInWindow.top - viewLocation[1]).toInt().coerceIn(0, source.height)
+    val right = ceil(boundsInWindow.right - viewLocation[0]).toInt().coerceIn(0, source.width)
+    val bottom = ceil(boundsInWindow.bottom - viewLocation[1]).toInt().coerceIn(0, source.height)
+    val width = max(0, right - left)
+    val height = max(0, bottom - top)
+
+    if (width <= 1 || height <= 1) {
+        return source
+    }
+
+    val croppedWidth = min(width, source.width - left)
+    val croppedHeight = min(height, source.height - top)
+
+    return Bitmap.createBitmap(
+        source,
+        left,
+        top,
+        croppedWidth,
+        croppedHeight
+    )
 }
 
 tailrec fun Context.findActivity(): Activity? {

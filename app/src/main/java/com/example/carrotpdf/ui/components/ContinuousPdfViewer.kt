@@ -42,6 +42,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -96,6 +98,7 @@ fun ContinuousPdfViewer(
     ) -> Unit = { _, _, _, _ -> },
     onUserInteraction: () -> Unit = {},
     onViewportOriginChange: (leftPx: Float, topPx: Float) -> Unit = { _, _ -> },
+    onCurrentPageBoundsChange: (Rect) -> Unit = {},
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
         pageCount: Int,
@@ -460,7 +463,12 @@ fun ContinuousPdfViewer(
                                     ?.takeIf { selection -> selection.hasSelectionOnPage(pageIndex) },
                                 onLinkTap = onLinkTap,
                                 onTextLongPress = onTextLongPress,
-                                onTextSelectionHandleDrag = onTextSelectionHandleDrag
+                                onTextSelectionHandleDrag = onTextSelectionHandleDrag,
+                                onPageBoundsChange = { bounds ->
+                                    if (pageIndex == viewerState.currentPageIndex) {
+                                        onCurrentPageBoundsChange(bounds)
+                                    }
+                                }
                             )
                         }
                     }
@@ -505,7 +513,8 @@ private fun PdfPageItem(
         pageIndex: Int,
         normalizedX: Float,
         normalizedY: Float
-    ) -> Unit
+    ) -> Unit,
+    onPageBoundsChange: (Rect) -> Unit
 ) {
     val renderKey = remember(
         documentId,
@@ -571,7 +580,10 @@ private fun PdfPageItem(
     Card(
         modifier = Modifier
             .width(pageWidth)
-            .height(pageHeight),
+            .height(pageHeight)
+            .onGloballyPositioned { coordinates ->
+                onPageBoundsChange(coordinates.boundsInWindow())
+            },
         shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color.White
