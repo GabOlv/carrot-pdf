@@ -50,6 +50,7 @@ object PdfTabPersistence {
                         .toFloat()
                         .takeIf { it.isFinite() && it >= 0f }
                         ?: 0f
+                    val isMissing = item.optBoolean("isMissing", false)
 
                     add(
                         PdfTab(
@@ -59,7 +60,8 @@ object PdfTabPersistence {
                             currentPageIndex = currentPageIndex,
                             zoom = zoom,
                             viewportLeft = viewportLeft,
-                            viewportTop = viewportTop
+                            viewportTop = viewportTop,
+                            isMissing = isMissing
                         )
                     )
                 }
@@ -90,6 +92,7 @@ object PdfTabPersistence {
                     .put("zoom", tab.zoom)
                     .put("viewportLeft", tab.viewportLeft)
                     .put("viewportTop", tab.viewportTop)
+                    .put("isMissing", tab.isMissing)
             )
         }
 

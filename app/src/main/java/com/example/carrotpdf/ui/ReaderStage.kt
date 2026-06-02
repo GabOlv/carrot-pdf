@@ -104,6 +104,7 @@ import com.example.carrotpdf.pdf.searchPdfText
 import com.example.carrotpdf.pdf.sharePdf
 import com.example.carrotpdf.ui.components.ContinuousPdfViewer
 import com.example.carrotpdf.ui.components.EmptyState
+import com.example.carrotpdf.ui.components.MissingPdfState
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.ui.design.CarrotDesignTheme
 import com.example.carrotpdf.ui.viewer.state.PdfViewerState
@@ -133,6 +134,8 @@ fun ReaderStage(
         onScrollToProgress: (Float) -> Unit
     ) -> Unit,
     onOpenPdf: () -> Unit,
+    onReimportMissingPdf: (PdfTab) -> Unit,
+    onRemoveMissingPdf: (PdfTab) -> Unit,
     onToggleChrome: () -> Unit,
     onRevealChrome: () -> Unit,
     onLinkTap: (PdfLinkRegion) -> Unit,
@@ -165,6 +168,18 @@ fun ReaderStage(
         when {
             activeTab == null -> {
                 EmptyState(onOpenPdf = onOpenPdf)
+            }
+
+            activeTab.isMissing -> {
+                MissingPdfState(
+                    title = activeTab.title,
+                    onReimport = {
+                        onReimportMissingPdf(activeTab)
+                    },
+                    onRemove = {
+                        onRemoveMissingPdf(activeTab)
+                    }
+                )
             }
 
             isLoadingDocument || activeTab.pageCount == 0 -> {

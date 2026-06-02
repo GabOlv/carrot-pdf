@@ -180,27 +180,28 @@ private fun CarrotPdfContent(
     var textSelectionDragGeneration by remember { mutableIntStateOf(0) }
     var isCapturingScreenshot by remember { mutableStateOf(false) }
     var currentPaperBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
+    var reimportingTabId by remember { mutableStateOf<String?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val activeViewerState = rememberActiveViewerState(activeTab)
-    val activeSearchSession = remember(activeTab?.id) {
-        activeTab?.let { tab ->
+    val activeSearchSession = remember(activeTab?.id, activeTab?.uri, activeTab?.isMissing) {
+        activeTab?.takeUnless { it.isMissing }?.let { tab ->
             PdfSearchSession(
                 context = context.applicationContext,
                 uri = tab.uri
             )
         }
     }
-    val activeLinkSession = remember(activeTab?.id) {
-        activeTab?.let { tab ->
+    val activeLinkSession = remember(activeTab?.id, activeTab?.uri, activeTab?.isMissing) {
+        activeTab?.takeUnless { it.isMissing }?.let { tab ->
             PdfLinkSession(
                 context = context.applicationContext,
                 uri = tab.uri
             )
         }
     }
-    val activeTextIndexSession = remember(activeTab?.id) {
-        activeTab?.let { tab ->
+    val activeTextIndexSession = remember(activeTab?.id, activeTab?.uri, activeTab?.isMissing) {
+        activeTab?.takeUnless { it.isMissing }?.let { tab ->
             PdfTextIndexSession(
                 context = context.applicationContext,
                 uri = tab.uri
@@ -243,12 +244,49 @@ private fun CarrotPdfContent(
 
         if (existingTab != null) {
             activeTabId = existingTab.id
+            updateActiveTab(tabs, existingTab.id) { tab ->
+                if (tab.isMissing) {
+                    tab.copy(
+                        title = title,
+                        isMissing = false,
+                        pageCount = 0,
+                        pageSizes = emptyList()
+                    )
+                } else {
+                    tab
+                }
+            }
         } else {
             val tab = PdfTab(uri = uri, title = title)
             tabs.add(tab)
             activeTabId = tab.id
         }
 
+        closeSearch()
+        isChromeVisible = true
+        persistTabsNow()
+    }
+
+    fun reimportTab(
+        tabId: String,
+        uri: Uri,
+        title: String
+    ) {
+        updateActiveTab(tabs, tabId) { tab ->
+            tab.copy(
+                uri = uri,
+                title = title,
+                pageCount = 0,
+                pageSizes = emptyList(),
+                currentPageIndex = 0,
+                zoom = 1f,
+                viewportLeft = 0f,
+                viewportTop = 0f,
+                isMissing = false
+            )
+        }
+
+        activeTabId = tabId
         closeSearch()
         isChromeVisible = true
         persistTabsNow()
@@ -359,11 +397,24 @@ private fun CarrotPdfContent(
                     // Some providers grant only temporary access.
                 }
 
-                openTab(
-                    uri = uri,
-                    title = getPdfTitle(context, uri)
-                )
+                val title = getPdfTitle(context, uri)
+                val targetTabId = reimportingTabId
+
+                if (targetTabId != null && tabs.any { tab -> tab.id == targetTabId }) {
+                    reimportTab(
+                        tabId = targetTabId,
+                        uri = uri,
+                        title = title
+                    )
+                } else {
+                    openTab(
+                        uri = uri,
+                        title = title
+                    )
+                }
             }
+
+            reimportingTabId = null
         }
     )
     val openPdf = {
@@ -429,24 +480,26 @@ private fun CarrotPdfContent(
         val restoredTabs = withContext(Dispatchers.IO) {
             PdfTabPersistence.restore(context.applicationContext)
         }
-        val readableTabs = withContext(Dispatchers.IO) {
-            restoredTabs.tabs.filter { tab ->
-                canReadPdfUri(context.applicationContext, tab.uri)
+        val restoredTabsWithMissingState = withContext(Dispatchers.IO) {
+            restoredTabs.tabs.map { tab ->
+                tab.copy(
+                    isMissing = tab.isMissing || !canReadPdfUri(context.applicationContext, tab.uri)
+                )
             }
         }
         val restoredActiveTabId = restoredTabs.activeTabId
-            ?.takeIf { id -> readableTabs.any { tab -> tab.id == id } }
-            ?: readableTabs.firstOrNull()?.id
+            ?.takeIf { id -> restoredTabsWithMissingState.any { tab -> tab.id == id } }
+            ?: restoredTabsWithMissingState.firstOrNull()?.id
 
-        if (tabs.isEmpty() && readableTabs.isNotEmpty()) {
-            tabs.addAll(readableTabs)
+        if (tabs.isEmpty() && restoredTabsWithMissingState.isNotEmpty()) {
+            tabs.addAll(restoredTabsWithMissingState)
             activeTabId = restoredActiveTabId
         }
 
-        if (readableTabs.size != restoredTabs.tabs.size) {
+        if (restoredTabsWithMissingState != restoredTabs.tabs) {
             PdfTabPersistence.save(
                 context = context.applicationContext,
-                tabs = readableTabs,
+                tabs = restoredTabsWithMissingState,
                 activeTabId = restoredActiveTabId
             )
         }
@@ -474,6 +527,11 @@ private fun CarrotPdfContent(
 
         val tab = activeTab ?: return@LaunchedEffect
 
+        if (tab.isMissing) {
+            isLoadingDocument = false
+            return@LaunchedEffect
+        }
+
         if (tab.pageCount == 0 || tab.pageSizes.isEmpty()) {
             isLoadingDocument = true
 
@@ -494,10 +552,13 @@ private fun CarrotPdfContent(
             loadedDocument
                 .onSuccess { (pageCount, pageSizes) ->
                     if (pageCount <= 0) {
-                        closeTab(tab.id)
+                        updateActiveTab(tabs, tab.id) { currentTab ->
+                            currentTab.copy(isMissing = true)
+                        }
+                        persistTabsNow()
                         Toast.makeText(
                             context,
-                            "Could not reopen this PDF.",
+                            "Could not find this PDF.",
                             Toast.LENGTH_SHORT
                         ).show()
                         return@onSuccess
@@ -512,10 +573,13 @@ private fun CarrotPdfContent(
                     persistTabsNow()
                 }
                 .onFailure {
-                    closeTab(tab.id)
+                    updateActiveTab(tabs, tab.id) { currentTab ->
+                        currentTab.copy(isMissing = true)
+                    }
+                    persistTabsNow()
                     Toast.makeText(
                         context,
-                        "Could not reopen this PDF.",
+                        "Could not find this PDF.",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -603,6 +667,13 @@ private fun CarrotPdfContent(
                     )
                 },
                 onOpenPdf = openPdf,
+                onReimportMissingPdf = { tab ->
+                    reimportingTabId = tab.id
+                    pdfPicker.launch(arrayOf("application/pdf"))
+                },
+                onRemoveMissingPdf = { tab ->
+                    closeTab(tab.id)
+                },
                 onToggleChrome = {
                     if (selectedTextSelection != null) {
                         selectedTextSelection = null
@@ -757,7 +828,7 @@ private fun CarrotPdfContent(
                             activity?.finish()
                         },
                         onSearch = {
-                            if (activeTab != null) {
+                            if (activeTab != null && !activeTab.isMissing) {
                                 selectedTextSelection = null
                                 selectedExternalLink = null
                                 isSearchVisible = true
@@ -856,6 +927,7 @@ private fun CarrotPdfContent(
                 AnimatedVisibility(
                     visible = (isChromeVisible || isSearchVisible) &&
                         activeTab != null &&
+                        !activeTab.isMissing &&
                         selectedTextSelection == null,
                     enter = fadeIn(),
                     exit = fadeOut(),
@@ -882,6 +954,7 @@ private fun CarrotPdfContent(
                 AnimatedVisibility(
                     visible = (isChromeVisible || isSearchVisible) &&
                         activeTab != null &&
+                        !activeTab.isMissing &&
                         selectedTextSelection == null,
                     enter = fadeIn(),
                     exit = fadeOut(),
@@ -991,7 +1064,7 @@ private fun CarrotPdfContent(
 
             if (isOverflowOpen) {
                 ReaderMenuPopup(
-                    hasDocument = activeTab != null,
+                    hasDocument = activeTab != null && !activeTab.isMissing,
                     onOpenPdf = {
                         isOverflowOpen = false
                         openPdf()
@@ -1076,7 +1149,7 @@ private fun CarrotPdfContent(
 private fun rememberActiveViewerState(
     activeTab: PdfTab?
 ): PdfViewerState? {
-    if (activeTab == null) {
+    if (activeTab == null || activeTab.isMissing) {
         return null
     }
 
