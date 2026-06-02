@@ -42,6 +42,14 @@ object PdfTabPersistence {
                         .toFloat()
                         .takeIf { it.isFinite() && it > 0f }
                         ?: 1f
+                    val viewportLeft = item.optDouble("viewportLeft", 0.0)
+                        .toFloat()
+                        .takeIf { it.isFinite() && it >= 0f }
+                        ?: 0f
+                    val viewportTop = item.optDouble("viewportTop", 0.0)
+                        .toFloat()
+                        .takeIf { it.isFinite() && it >= 0f }
+                        ?: 0f
 
                     add(
                         PdfTab(
@@ -49,7 +57,9 @@ object PdfTabPersistence {
                             uri = uri,
                             title = title,
                             currentPageIndex = currentPageIndex,
-                            zoom = zoom
+                            zoom = zoom,
+                            viewportLeft = viewportLeft,
+                            viewportTop = viewportTop
                         )
                     )
                 }
@@ -78,6 +88,8 @@ object PdfTabPersistence {
                     .put("title", tab.title)
                     .put("currentPageIndex", tab.currentPageIndex)
                     .put("zoom", tab.zoom)
+                    .put("viewportLeft", tab.viewportLeft)
+                    .put("viewportTop", tab.viewportTop)
             )
         }
 

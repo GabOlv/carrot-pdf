@@ -11,5 +11,7 @@ data class PdfTab(
     val currentPageIndex: Int = 0,
     val pageCount: Int = 0,
     val pageSizes: List<PdfPageSize> = emptyList(),
-    val zoom: Float = 1f
+    val zoom: Float = 1f,
+    val viewportLeft: Float = 0f,
+    val viewportTop: Float = 0f
 )

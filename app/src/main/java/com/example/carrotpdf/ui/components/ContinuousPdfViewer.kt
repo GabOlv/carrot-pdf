@@ -95,6 +95,7 @@ fun ContinuousPdfViewer(
         normalizedY: Float
     ) -> Unit = { _, _, _, _ -> },
     onUserInteraction: () -> Unit = {},
+    onViewportOriginChange: (leftPx: Float, topPx: Float) -> Unit = { _, _ -> },
     pageIndicatorContent: @Composable BoxScope.(
         currentPage: Int,
         pageCount: Int,
@@ -175,8 +176,11 @@ fun ContinuousPdfViewer(
                     ?.coerceIn(0f, documentGeometry.totalHeightPx)
                     ?: 0f
                 viewerState.viewportState.setViewportOrigin(
-                    leftPx = 0f,
-                    topPx = initialTopPx
+                    leftPx = viewerState.initialViewportLeftPx.coerceAtLeast(0f),
+                    topPx = viewerState.initialViewportTopPx
+                        .takeIf { it > 0f }
+                        ?.coerceIn(0f, documentGeometry.totalHeightPx)
+                        ?: initialTopPx
                 )
                 hasInitializedScroll = true
             }
@@ -232,6 +236,14 @@ fun ContinuousPdfViewer(
             }
 
             consumed
+        }
+
+        LaunchedEffect(viewerState.documentId, viewportState) {
+            snapshotFlow { viewportState.viewportOrigin() }
+                .distinctUntilChanged()
+                .collect { origin ->
+                    onViewportOriginChange(origin.x, origin.y)
+                }
         }
 
         LaunchedEffect(isManualScrollInProgress, viewportState.panOffset) {

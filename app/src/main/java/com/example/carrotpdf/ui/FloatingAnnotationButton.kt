@@ -190,3 +190,61 @@ fun FloatingAnnotationButton(
     }
 }
 
+@Composable
+fun FloatingPrintButton(
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(14.dp)
+            )
+            .background(
+                color = Color(0xCC1C2229),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.size(25.dp)) {
+            val icon = Color.White.copy(alpha = 0.92f)
+            val accent = Color(0xFFFF7A1A)
+            val stroke = 2.dp.toPx()
+
+            drawRoundRect(
+                color = icon,
+                topLeft = Offset(7.dp.toPx(), 3.dp.toPx()),
+                size = androidx.compose.ui.geometry.Size(11.dp.toPx(), 7.dp.toPx()),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.2.dp.toPx()),
+                style = Stroke(width = stroke)
+            )
+            drawRoundRect(
+                color = icon,
+                topLeft = Offset(4.dp.toPx(), 9.dp.toPx()),
+                size = androidx.compose.ui.geometry.Size(17.dp.toPx(), 9.dp.toPx()),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+                style = Stroke(width = stroke)
+            )
+            drawRoundRect(
+                color = icon,
+                topLeft = Offset(7.dp.toPx(), 15.dp.toPx()),
+                size = androidx.compose.ui.geometry.Size(11.dp.toPx(), 7.dp.toPx()),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.2.dp.toPx()),
+                style = Stroke(width = stroke)
+            )
+            drawCircle(
+                color = accent,
+                radius = 1.3.dp.toPx(),
+                center = Offset(18.dp.toPx(), 12.dp.toPx())
+            )
+        }
+    }
+}
+

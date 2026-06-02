@@ -144,7 +144,8 @@ fun ReaderStage(
     ) -> Unit,
     onUserInteraction: () -> Unit,
     onCurrentPageChange: (Int) -> Unit,
-    onZoomCommitted: (Float) -> Unit
+    onZoomCommitted: (Float) -> Unit,
+    onViewportOriginChange: (leftPx: Float, topPx: Float) -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -186,6 +187,7 @@ fun ReaderStage(
                     onTextLongPress = onTextLongPress,
                     onTextSelectionHandleDrag = onTextSelectionHandleDrag,
                     onUserInteraction = onUserInteraction,
+                    onViewportOriginChange = onViewportOriginChange,
                     pageIndicatorContent = { currentPage, pageCount, isScrollInProgress, scrollProgress, onScrollToProgress ->
                         pageIndicatorContent(
                             currentPage,

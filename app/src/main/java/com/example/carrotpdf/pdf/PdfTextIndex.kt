@@ -681,7 +681,7 @@ private class PdfTextIndexCollector : PDFTextStripper() {
     private var currentPageGlyphs = mutableListOf<PdfTextGlyph>()
 
     fun extract(document: PDDocument): List<PdfTextIndexedPage> {
-        sortByPosition = true
+        sortByPosition = false
         startPage = 1
         endPage = document.numberOfPages
         getText(document)

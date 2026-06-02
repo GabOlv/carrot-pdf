@@ -119,6 +119,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 
 @Composable
 fun CarrotPdfApp(
@@ -231,12 +232,6 @@ private fun CarrotPdfContent(
 
         if (existingTab != null) {
             activeTabId = existingTab.id
-            updateActiveTab(tabs, existingTab.id) { tab ->
-                tab.copy(
-                    currentPageIndex = 0,
-                    zoom = 1f
-                )
-            }
         } else {
             val tab = PdfTab(uri = uri, title = title)
             tabs.add(tab)
@@ -423,10 +418,26 @@ private fun CarrotPdfContent(
         val restoredTabs = withContext(Dispatchers.IO) {
             PdfTabPersistence.restore(context.applicationContext)
         }
+        val readableTabs = withContext(Dispatchers.IO) {
+            restoredTabs.tabs.filter { tab ->
+                canReadPdfUri(context.applicationContext, tab.uri)
+            }
+        }
+        val restoredActiveTabId = restoredTabs.activeTabId
+            ?.takeIf { id -> readableTabs.any { tab -> tab.id == id } }
+            ?: readableTabs.firstOrNull()?.id
 
-        if (tabs.isEmpty() && restoredTabs.tabs.isNotEmpty()) {
-            tabs.addAll(restoredTabs.tabs)
-            activeTabId = restoredTabs.activeTabId
+        if (tabs.isEmpty() && readableTabs.isNotEmpty()) {
+            tabs.addAll(readableTabs)
+            activeTabId = restoredActiveTabId
+        }
+
+        if (readableTabs.size != restoredTabs.tabs.size) {
+            PdfTabPersistence.save(
+                context = context.applicationContext,
+                tabs = readableTabs,
+                activeTabId = restoredActiveTabId
+            )
         }
 
         hasRestoredPersistedTabs = true
@@ -454,24 +465,48 @@ private fun CarrotPdfContent(
         if (tab.pageCount == 0 || tab.pageSizes.isEmpty()) {
             isLoadingDocument = true
 
-            val pageSizes = withContext(Dispatchers.IO) {
-                getPdfPageSizes(context, tab.uri)
-            }
-            val pageCount = pageSizes.size.takeIf { it > 0 }
-                ?: withContext(Dispatchers.IO) {
-                    getPdfPageCount(context, tab.uri)
+            val loadedDocument = withContext(Dispatchers.IO) {
+                runCatching {
+                    withTimeoutOrNull(DOCUMENT_LOAD_TIMEOUT_MS) {
+                        val pageSizes = getPdfPageSizes(context, tab.uri)
+                        val pageCount = pageSizes.size.takeIf { it > 0 }
+                            ?: getPdfPageCount(context, tab.uri)
+
+                        pageCount to pageSizes
+                    } ?: error("PDF load timed out")
                 }
+            }
 
             isLoadingDocument = false
 
-            if (pageCount > 0) {
-                updateActiveTab(tabs, tab.id) { currentTab ->
-                    currentTab.copy(
-                        pageCount = pageCount,
-                        pageSizes = pageSizes
-                    )
+            loadedDocument
+                .onSuccess { (pageCount, pageSizes) ->
+                    if (pageCount <= 0) {
+                        closeTab(tab.id)
+                        Toast.makeText(
+                            context,
+                            "Could not reopen this PDF.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@onSuccess
+                    }
+
+                    updateActiveTab(tabs, tab.id) { currentTab ->
+                        currentTab.copy(
+                            pageCount = pageCount,
+                            pageSizes = pageSizes
+                        )
+                    }
+                    persistTabsNow()
                 }
-            }
+                .onFailure {
+                    closeTab(tab.id)
+                    Toast.makeText(
+                        context,
+                        "Could not reopen this PDF.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
         }
     }
 
@@ -674,6 +709,21 @@ private fun CarrotPdfContent(
                         }
                     }
                     persistTabsNow()
+                },
+                onViewportOriginChange = { leftPx, topPx ->
+                    updateActiveTab(tabs, activeTabId) { tab ->
+                        if (
+                            abs(tab.viewportLeft - leftPx) < 0.5f &&
+                            abs(tab.viewportTop - topPx) < 0.5f
+                        ) {
+                            tab
+                        } else {
+                            tab.copy(
+                                viewportLeft = leftPx.coerceAtLeast(0f),
+                                viewportTop = topPx.coerceAtLeast(0f)
+                            )
+                        }
+                    }
                 }
             )
 
@@ -800,6 +850,30 @@ private fun CarrotPdfContent(
                             "Annotations will come later.",
                             Toast.LENGTH_SHORT
                         ).show()
+                    }
+                )
+            }
+
+            AnimatedVisibility(
+                visible = (isChromeVisible || isSearchVisible) &&
+                    activeTab != null &&
+                    selectedTextSelection == null,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(
+                        start = 18.dp,
+                        bottom = navigationBarBottom + 18.dp
+                    )
+            ) {
+                FloatingPrintButton(
+                    onClick = {
+                        val tab = activeTab
+
+                        if (tab != null) {
+                            printPdf(context, tab.uri, tab.title)
+                        }
                     }
                 )
             }
@@ -940,7 +1014,9 @@ private fun rememberActiveViewerState(
         documentId = activeTab.id,
         pageCount = activeTab.pageCount,
         initialPageIndex = activeTab.currentPageIndex,
-        initialZoom = activeTab.zoom
+        initialZoom = activeTab.zoom,
+        initialViewportLeftPx = activeTab.viewportLeft,
+        initialViewportTopPx = activeTab.viewportTop
     )
 }
 
@@ -1004,6 +1080,18 @@ private fun getPdfTitle(
         ?.substringAfterLast(":")
         ?.takeIf { it.isNotBlank() }
         ?: "Document.pdf"
+}
+
+private fun canReadPdfUri(
+    context: Context,
+    uri: Uri
+): Boolean {
+    return runCatching {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use {
+            it.statSize
+            true
+        } ?: false
+    }.getOrDefault(false)
 }
 
 tailrec fun Context.findActivity(): Activity? {
@@ -1088,4 +1176,5 @@ const val SEARCH_DEBOUNCE_MS = 320L
 const val EDGE_REVEAL_DISTANCE_PX = 18f
 const val PAGE_INDICATOR_VISIBLE_MS = 1200L
 const val TAB_REORDER_HOLD_MS = 180L
+const val DOCUMENT_LOAD_TIMEOUT_MS = 12_000L
 

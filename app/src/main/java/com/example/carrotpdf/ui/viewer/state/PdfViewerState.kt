@@ -22,6 +22,8 @@ class PdfViewerState(
     pageCount: Int,
     initialPageIndex: Int = 0,
     initialZoom: Float = PdfViewportState.DEFAULT_ZOOM,
+    val initialViewportLeftPx: Float = 0f,
+    val initialViewportTopPx: Float = 0f,
     val viewportState: PdfViewportState = PdfViewportState(initialZoom)
 ) {
     var pageCount by mutableIntStateOf(pageCount.coerceAtLeast(0))
@@ -201,14 +203,18 @@ fun rememberPdfViewerState(
     documentId: String,
     pageCount: Int,
     initialPageIndex: Int = 0,
-    initialZoom: Float = PdfViewportState.DEFAULT_ZOOM
+    initialZoom: Float = PdfViewportState.DEFAULT_ZOOM,
+    initialViewportLeftPx: Float = 0f,
+    initialViewportTopPx: Float = 0f
 ): PdfViewerState {
     val state = remember(documentId) {
         PdfViewerState(
             documentId = documentId,
             pageCount = pageCount,
             initialPageIndex = initialPageIndex,
-            initialZoom = initialZoom
+            initialZoom = initialZoom,
+            initialViewportLeftPx = initialViewportLeftPx,
+            initialViewportTopPx = initialViewportTopPx
         )
     }
 
