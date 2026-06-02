@@ -104,6 +104,7 @@ import com.example.carrotpdf.pdf.PdfSearchSession
 import com.example.carrotpdf.pdf.PdfTextIndexSession
 import com.example.carrotpdf.pdf.PdfTextSelection
 import com.example.carrotpdf.pdf.PdfTextSelectionHandle
+import com.example.carrotpdf.pdf.createAnnotatedPdfExport
 import com.example.carrotpdf.pdf.createPdfFromImages
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.downloadPdf
@@ -183,6 +184,7 @@ private fun CarrotPdfContent(
     var activeSearchResultIndex by remember { mutableIntStateOf(-1) }
     var isLoadingDocument by remember { mutableStateOf(false) }
     var isCreatingImagePdf by remember { mutableStateOf(false) }
+    var isExportingAnnotatedPdf by remember { mutableStateOf(false) }
     var hasRestoredPersistedTabs by remember { mutableStateOf(false) }
     var selectedExternalLink by remember { mutableStateOf<String?>(null) }
     var selectedTextSelection by remember { mutableStateOf<PdfTextSelection?>(null) }
@@ -373,6 +375,36 @@ private fun CarrotPdfContent(
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+        }
+    }
+
+    suspend fun exportablePdfUri(tab: PdfTab): Uri? {
+        val pageInk = workspacePageInkStrokes
+
+        if (pageInk.isEmpty()) {
+            return tab.uri
+        }
+
+        isExportingAnnotatedPdf = true
+
+        return try {
+            withContext(Dispatchers.IO) {
+                createAnnotatedPdfExport(
+                    context = context.applicationContext,
+                    sourceUri = tab.uri,
+                    title = tab.title,
+                    pageInkStrokes = pageInk
+                ).getOrThrow().uri
+            }
+        } catch (_: Throwable) {
+            Toast.makeText(
+                context,
+                "Could not export annotated PDF.",
+                Toast.LENGTH_SHORT
+            ).show()
+            null
+        } finally {
+            isExportingAnnotatedPdf = false
         }
     }
 
@@ -1244,26 +1276,42 @@ private fun CarrotPdfContent(
                         val tab = activeTab
 
                         if (tab != null) {
-                            sharePdf(context, tab.uri, tab.title)
+                            isOverflowOpen = false
+                            coroutineScope.launch {
+                                exportablePdfUri(tab)?.let { exportUri ->
+                                    sharePdf(context, exportUri, tab.title)
+                                }
+                            }
                         }
                     },
                     onDownloadPdf = {
                         val tab = activeTab
 
                         if (tab != null) {
-                            val success = downloadPdf(context, tab.uri, tab.title)
-                            Toast.makeText(
-                                context,
-                                if (success) "PDF downloaded" else "Could not download PDF",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            isOverflowOpen = false
+                            coroutineScope.launch {
+                                val exportUri = exportablePdfUri(tab) ?: return@launch
+                                val success = withContext(Dispatchers.IO) {
+                                    downloadPdf(context, exportUri, tab.title)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    if (success) "PDF downloaded" else "Could not download PDF",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
                     },
                     onPrintPdf = {
                         val tab = activeTab
 
                         if (tab != null) {
-                            printPdf(context, tab.uri, tab.title)
+                            isOverflowOpen = false
+                            coroutineScope.launch {
+                                exportablePdfUri(tab)?.let { exportUri ->
+                                    printPdf(context, exportUri, tab.title)
+                                }
+                            }
                         }
                     },
                     onDismiss = {
@@ -1298,6 +1346,22 @@ private fun CarrotPdfContent(
                         selectedExternalLink = null
                     }
                 )
+            }
+
+            if (isExportingAnnotatedPdf) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.42f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Preparing PDF...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
 
         }
