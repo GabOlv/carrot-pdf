@@ -50,15 +50,21 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.workspace.CanvasInkStroke
+import com.example.carrotpdf.workspace.DEFAULT_CANVAS_HEIGHT
+import com.example.carrotpdf.workspace.DEFAULT_CANVAS_WIDTH
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
@@ -146,15 +152,13 @@ fun NotesWorkspaceSheet(
                 )
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            if (!isSideLayout) {
-                WorkspaceDragHandle(
-                    isExpanded = isExpanded,
-                    onExpandedChange = onExpandedChange,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
+            WorkspaceDragHandle(
+                isExpanded = isExpanded,
+                onExpandedChange = onExpandedChange,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
 
-                Spacer(modifier = Modifier.height(8.dp))
-            }
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -206,6 +210,7 @@ fun NotesWorkspaceSheet(
                     pageInkStrokeCount = pageInkStrokeCount,
                     onUndoPageInk = onUndoPageInk,
                     isSideLayout = isSideLayout,
+                    isExpanded = isExpanded,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -296,6 +301,7 @@ private fun DrawWorkspace(
     pageInkStrokeCount: Int,
     onUndoPageInk: () -> Unit,
     isSideLayout: Boolean,
+    isExpanded: Boolean,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -343,8 +349,8 @@ private fun DrawWorkspace(
                 onColorChange = onInkColorChange,
                 selectedStrokeWidth = selectedStrokeWidth,
                 onStrokeWidthChange = onStrokeWidthChange,
-                isSideLayout = isSideLayout,
-                modifier = if (isSideLayout) Modifier.weight(1f) else Modifier
+                fillAvailableHeight = isSideLayout || isExpanded,
+                modifier = if (isSideLayout || isExpanded) Modifier.weight(1f) else Modifier
             )
 
             DrawTarget.Pdf -> Unit
@@ -362,13 +368,15 @@ private fun FreeDrawCanvas(
     onColorChange: (Long) -> Unit,
     selectedStrokeWidth: Float,
     onStrokeWidthChange: (Float) -> Unit,
-    isSideLayout: Boolean,
+    fillAvailableHeight: Boolean,
     modifier: Modifier = Modifier
 ) {
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var canvasScale by remember { mutableFloatStateOf(INITIAL_CANVAS_SCALE) }
     var canvasOffset by remember { mutableStateOf(Offset.Zero) }
+    var hasInitializedCanvasViewport by remember { mutableStateOf(false) }
     var currentStrokePoints by remember { mutableStateOf<List<InkPoint>>(emptyList()) }
+    var currentErasePoints by remember { mutableStateOf<List<InkPoint>>(emptyList()) }
     val latestStrokes by rememberUpdatedState(strokes)
     val latestSelectedColor by rememberUpdatedState(selectedColor)
     val latestSelectedStrokeWidth by rememberUpdatedState(selectedStrokeWidth)
@@ -412,8 +420,8 @@ private fun FreeDrawCanvas(
         modifier = modifier
             .fillMaxWidth()
             .then(
-                if (isSideLayout) {
-                    Modifier.fillMaxHeight()
+                if (fillAvailableHeight) {
+                    Modifier
                 } else {
                     Modifier.height(178.dp)
                 }
@@ -430,6 +438,14 @@ private fun FreeDrawCanvas(
                 .clip(RoundedCornerShape(12.dp))
                 .onSizeChanged { size ->
                     viewportSize = size
+                    if (!hasInitializedCanvasViewport && size.width > 0 && size.height > 0) {
+                        canvasScale = (
+                            max(size.width, size.height).toFloat() /
+                                DEFAULT_CANVAS_REGION_SIZE
+                            ).coerceIn(MIN_CANVAS_SCALE, MAX_CANVAS_SCALE)
+                        canvasOffset = Offset.Zero
+                        hasInitializedCanvasViewport = true
+                    }
                     canvasOffset = clampOffset(canvasOffset, canvasScale)
                 }
                 .pointerInput(selectedTool) {
@@ -455,8 +471,10 @@ private fun FreeDrawCanvas(
                         var isTransforming = false
                         var lastCentroid: Offset? = null
                         var lastDistance = 0f
+                        var workingStrokes = latestStrokes
 
                         currentStrokePoints = gestureStrokePoints
+                        currentErasePoints = erasePoints
 
                         while (true) {
                             val event = awaitPointerEvent()
@@ -489,12 +507,11 @@ private fun FreeDrawCanvas(
                                     effectiveTool == WorkspaceDrawTool.Eraser &&
                                     erasePoints.isNotEmpty()
                                 ) {
-                                    latestOnStrokesChange(
-                                        latestStrokes.eraseCanvasStrokes(erasePoints)
-                                    )
+                                    latestOnStrokesChange(workingStrokes)
                                 }
 
                                 currentStrokePoints = emptyList()
+                                currentErasePoints = emptyList()
                                 break
                             }
 
@@ -520,12 +537,14 @@ private fun FreeDrawCanvas(
                                     emptyList()
                                 }
                                 currentStrokePoints = gestureStrokePoints
+                                currentErasePoints = erasePoints
                                 isTransforming = false
                                 lastCentroid = null
                                 lastDistance = 0f
                             } else if (change.isStylusEraserPointer()) {
                                 effectiveTool = WorkspaceDrawTool.Eraser
                                 currentStrokePoints = emptyList()
+                                currentErasePoints = erasePoints
                             }
 
                             if (isStylusGesture && !change.isStylusLikePointer()) {
@@ -537,6 +556,7 @@ private fun FreeDrawCanvas(
                                 isTransforming = true
                                 gestureStrokePoints = emptyList()
                                 currentStrokePoints = emptyList()
+                                currentErasePoints = emptyList()
 
                                 val centroid = centroidOf(pressedChanges)
                                 val distance = averageDistanceFromCentroid(
@@ -546,7 +566,6 @@ private fun FreeDrawCanvas(
                                 val previousCentroid = lastCentroid
 
                                 if (previousCentroid != null) {
-                                    val pan = centroid - previousCentroid
                                     val oldScale = canvasScale
                                     val zoomChange = if (lastDistance > 0f && distance > 0f) {
                                         distance / lastDistance
@@ -557,14 +576,14 @@ private fun FreeDrawCanvas(
                                         MIN_CANVAS_SCALE,
                                         MAX_CANVAS_SCALE
                                     )
-                                    val contentX = (centroid.x - canvasOffset.x) / oldScale
-                                    val contentY = (centroid.y - canvasOffset.y) / oldScale
+                                    val contentX = (previousCentroid.x - canvasOffset.x) / oldScale
+                                    val contentY = (previousCentroid.y - canvasOffset.y) / oldScale
 
                                     canvasScale = newScale
                                     canvasOffset = clampOffset(
                                         Offset(
-                                            x = centroid.x - (contentX * newScale) + pan.x,
-                                            y = centroid.y - (contentY * newScale) + pan.y
+                                            x = centroid.x - (contentX * newScale),
+                                            y = centroid.y - (contentY * newScale)
                                         ),
                                         newScale
                                     )
@@ -587,10 +606,13 @@ private fun FreeDrawCanvas(
                                         point = screenToCanvas(change.position, change.pressure),
                                         minDistance = CANVAS_ERASER_SAMPLE_DISTANCE
                                     )
+                                    currentErasePoints = erasePoints
+                                    workingStrokes = workingStrokes.eraseCanvasStrokes(erasePoints)
+                                    latestOnStrokesChange(workingStrokes)
                                 } else {
                                     gestureStrokePoints = gestureStrokePoints.appendInkPointIfFarEnough(
                                         point = screenToCanvas(change.position, change.pressure),
-                                        minDistance = (latestSelectedStrokeWidth * 0.16f)
+                                        minDistance = (latestSelectedStrokeWidth * 0.08f)
                                             .coerceAtLeast(MIN_CANVAS_INK_POINT_DISTANCE)
                                     )
                                     currentStrokePoints = gestureStrokePoints
@@ -607,6 +629,11 @@ private fun FreeDrawCanvas(
                 }
     ) {
         Canvas(modifier = Modifier.matchParentSize()) {
+            drawCanvasGrid(
+                canvasOffset = canvasOffset,
+                canvasScale = canvasScale
+            )
+
             strokes.forEach { stroke ->
                 drawInkStroke(
                     points = stroke.points,
@@ -622,6 +649,14 @@ private fun FreeDrawCanvas(
                     points = currentStrokePoints,
                     color = argbColor(selectedColor),
                     width = selectedStrokeWidth,
+                    canvasOffset = canvasOffset,
+                    canvasScale = canvasScale
+                )
+            }
+
+            if (currentErasePoints.isNotEmpty()) {
+                drawEraserPreview(
+                    points = currentErasePoints,
                     canvasOffset = canvasOffset,
                     canvasScale = canvasScale
                 )
@@ -745,6 +780,9 @@ private fun CompactDrawToolButton(
     Box(
         modifier = Modifier
             .size(36.dp)
+            .semantics {
+                contentDescription = tool.accessibleLabel()
+            }
             .background(
                 color = if (selected) accent.copy(alpha = 0.12f) else Color.Transparent,
                 shape = RoundedCornerShape(999.dp)
@@ -893,7 +931,11 @@ private fun DrawToolButton(
     val iconColor = if (selected) accent else Color(0xFF3A424A)
 
     Column(
-        modifier = Modifier.clickable { onClick() },
+        modifier = Modifier
+            .semantics {
+                contentDescription = tool.accessibleLabel()
+            }
+            .clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
@@ -941,6 +983,9 @@ private fun DrawIconAction(
     Box(
         modifier = Modifier
             .size(42.dp)
+            .semantics {
+                contentDescription = icon.accessibleLabel()
+            }
             .background(
                 color = Color.White.copy(alpha = if (enabled) 0.55f else 0.24f),
                 shape = RoundedCornerShape(999.dp)
@@ -1153,7 +1198,11 @@ private fun WorkspaceModeButton(
     val underlineColor = if (selected) CarrotColors.Accent else Color.Transparent
 
     Column(
-        modifier = Modifier.clickable { onClick() },
+        modifier = Modifier
+            .semantics {
+                contentDescription = mode.accessibleLabel()
+            }
+            .clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Canvas(modifier = Modifier.size(24.dp)) {
@@ -1187,6 +1236,9 @@ private fun DrawTargetButton(
     Box(
         modifier = Modifier
             .size(38.dp)
+            .semantics {
+                contentDescription = target.accessibleLabel()
+            }
             .background(
                 color = if (selected) CarrotColors.Accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.42f),
                 shape = RoundedCornerShape(999.dp)
@@ -1206,6 +1258,84 @@ private fun DrawTargetButton(
             )
         }
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasGrid(
+    canvasOffset: Offset,
+    canvasScale: Float
+) {
+    if (canvasScale <= 0f) {
+        return
+    }
+
+    var gridStep = CANVAS_GRID_BASE_STEP
+    while (gridStep * canvasScale < CANVAS_GRID_MIN_SCREEN_STEP) {
+        gridStep *= 2f
+    }
+
+    val startX = (floor((-canvasOffset.x / canvasScale) / gridStep) * gridStep)
+        .coerceAtLeast(0f)
+    val endX = (ceil(((size.width - canvasOffset.x) / canvasScale) / gridStep) * gridStep)
+        .coerceAtMost(DRAW_CANVAS_WIDTH)
+    val startY = (floor((-canvasOffset.y / canvasScale) / gridStep) * gridStep)
+        .coerceAtLeast(0f)
+    val endY = (ceil(((size.height - canvasOffset.y) / canvasScale) / gridStep) * gridStep)
+        .coerceAtMost(DRAW_CANVAS_HEIGHT)
+
+    var x = startX
+    var column = (x / gridStep).toInt()
+    while (x <= endX) {
+        val major = column % CANVAS_GRID_MAJOR_INTERVAL == 0
+        val screenX = x * canvasScale + canvasOffset.x
+        drawLine(
+            color = Color(0xFF59636D).copy(alpha = if (major) 0.20f else 0.09f),
+            start = Offset(screenX, 0f),
+            end = Offset(screenX, size.height),
+            strokeWidth = if (major) 1.15f else 0.7f
+        )
+        x += gridStep
+        column += 1
+    }
+
+    var y = startY
+    var row = (y / gridStep).toInt()
+    while (y <= endY) {
+        val major = row % CANVAS_GRID_MAJOR_INTERVAL == 0
+        val screenY = y * canvasScale + canvasOffset.y
+        drawLine(
+            color = Color(0xFF59636D).copy(alpha = if (major) 0.20f else 0.09f),
+            start = Offset(0f, screenY),
+            end = Offset(size.width, screenY),
+            strokeWidth = if (major) 1.15f else 0.7f
+        )
+        y += gridStep
+        row += 1
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEraserPreview(
+    points: List<InkPoint>,
+    canvasOffset: Offset,
+    canvasScale: Float
+) {
+    val lastPoint = points.lastOrNull() ?: return
+    val center = Offset(
+        x = lastPoint.x * canvasScale + canvasOffset.x,
+        y = lastPoint.y * canvasScale + canvasOffset.y
+    )
+    val radius = (CANVAS_ERASER_RADIUS * canvasScale).coerceAtLeast(10f)
+
+    drawCircle(
+        color = Color.White.copy(alpha = 0.38f),
+        radius = radius,
+        center = center
+    )
+    drawCircle(
+        color = Color(0xFF59636D).copy(alpha = 0.62f),
+        radius = radius,
+        center = center,
+        style = Stroke(width = 1.4.dp.toPx())
+    )
 }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawInkStroke(
@@ -1370,49 +1500,66 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawToolIcon(
 
     when (tool) {
         WorkspaceDrawTool.Pen -> {
+            val penBody = Path().apply {
+                moveTo(6.dp.toPx(), 16.dp.toPx())
+                lineTo(14.5.dp.toPx(), 7.5.dp.toPx())
+                lineTo(17.5.dp.toPx(), 10.5.dp.toPx())
+                lineTo(9.dp.toPx(), 19.dp.toPx())
+                close()
+            }
+            drawPath(
+                path = penBody,
+                color = color,
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
             drawLine(
                 color = color,
-                start = Offset(6.dp.toPx(), 17.dp.toPx()),
-                end = Offset(16.dp.toPx(), 7.dp.toPx()),
+                start = Offset(14.dp.toPx(), 8.dp.toPx()),
+                end = Offset(17.dp.toPx(), 5.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
             drawLine(
                 color = color,
-                start = Offset(14.dp.toPx(), 5.dp.toPx()),
-                end = Offset(18.dp.toPx(), 9.dp.toPx()),
+                start = Offset(17.dp.toPx(), 5.dp.toPx()),
+                end = Offset(20.dp.toPx(), 8.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
             drawLine(
                 color = color,
-                start = Offset(5.dp.toPx(), 18.dp.toPx()),
-                end = Offset(10.dp.toPx(), 17.dp.toPx()),
+                start = Offset(6.dp.toPx(), 19.dp.toPx()),
+                end = Offset(10.dp.toPx(), 18.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
         }
 
         WorkspaceDrawTool.Marker -> {
+            val markerBody = Path().apply {
+                moveTo(6.dp.toPx(), 14.dp.toPx())
+                lineTo(14.dp.toPx(), 6.dp.toPx())
+                lineTo(18.dp.toPx(), 10.dp.toPx())
+                lineTo(10.dp.toPx(), 18.dp.toPx())
+                close()
+            }
+            drawPath(
+                path = markerBody,
+                color = color,
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
             drawLine(
                 color = color,
-                start = Offset(5.dp.toPx(), 15.dp.toPx()),
-                end = Offset(16.dp.toPx(), 7.dp.toPx()),
+                start = Offset(7.dp.toPx(), 14.dp.toPx()),
+                end = Offset(10.dp.toPx(), 17.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
             drawLine(
-                color = color,
-                start = Offset(7.dp.toPx(), 18.dp.toPx()),
-                end = Offset(18.dp.toPx(), 10.dp.toPx()),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = color,
-                start = Offset(4.dp.toPx(), 18.dp.toPx()),
-                end = Offset(12.dp.toPx(), 18.dp.toPx()),
-                strokeWidth = stroke,
+                color = color.copy(alpha = 0.55f),
+                start = Offset(4.dp.toPx(), 20.dp.toPx()),
+                end = Offset(14.dp.toPx(), 20.dp.toPx()),
+                strokeWidth = 3.dp.toPx(),
                 cap = StrokeCap.Round
             )
         }
@@ -1424,23 +1571,33 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawToolIcon(
             drawLine(color, Offset(11.dp.toPx(), 4.dp.toPx()), Offset(14.dp.toPx(), 7.dp.toPx()), stroke, StrokeCap.Round)
             drawLine(color, Offset(11.dp.toPx(), 18.dp.toPx()), Offset(8.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
             drawLine(color, Offset(11.dp.toPx(), 18.dp.toPx()), Offset(14.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(4.dp.toPx(), 11.dp.toPx()), Offset(7.dp.toPx(), 8.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(4.dp.toPx(), 11.dp.toPx()), Offset(7.dp.toPx(), 14.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(18.dp.toPx(), 11.dp.toPx()), Offset(15.dp.toPx(), 8.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(18.dp.toPx(), 11.dp.toPx()), Offset(15.dp.toPx(), 14.dp.toPx()), stroke, StrokeCap.Round)
         }
 
         WorkspaceDrawTool.Eraser -> {
-            drawRoundRect(
+            val eraser = Path().apply {
+                moveTo(5.dp.toPx(), 14.dp.toPx())
+                lineTo(12.dp.toPx(), 7.dp.toPx())
+                lineTo(18.dp.toPx(), 13.dp.toPx())
+                lineTo(11.dp.toPx(), 20.dp.toPx())
+                close()
+            }
+            drawPath(
+                path = eraser,
                 color = color,
-                topLeft = Offset(6.dp.toPx(), 6.dp.toPx()),
-                size = Size(12.dp.toPx(), 9.dp.toPx()),
-                style = Stroke(width = stroke),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
             )
             drawLine(
                 color = color,
-                start = Offset(8.dp.toPx(), 16.dp.toPx()),
-                end = Offset(18.dp.toPx(), 16.dp.toPx()),
+                start = Offset(8.dp.toPx(), 11.dp.toPx()),
+                end = Offset(14.dp.toPx(), 17.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
+            drawLine(color, Offset(11.dp.toPx(), 20.dp.toPx()), Offset(19.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
         }
     }
 }
@@ -1453,15 +1610,35 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawWorkspaceModeIc
 
     when (mode) {
         WorkspaceMode.Notes -> {
-            drawLine(color, Offset(5.dp.toPx(), 7.dp.toPx()), Offset(17.dp.toPx(), 7.dp.toPx()), stroke, StrokeCap.Round)
-            drawLine(color, Offset(5.dp.toPx(), 12.dp.toPx()), Offset(17.dp.toPx(), 12.dp.toPx()), stroke, StrokeCap.Round)
-            drawLine(color, Offset(5.dp.toPx(), 17.dp.toPx()), Offset(13.dp.toPx(), 17.dp.toPx()), stroke, StrokeCap.Round)
+            val note = Path().apply {
+                moveTo(5.dp.toPx(), 3.dp.toPx())
+                lineTo(15.dp.toPx(), 3.dp.toPx())
+                lineTo(19.dp.toPx(), 7.dp.toPx())
+                lineTo(19.dp.toPx(), 21.dp.toPx())
+                lineTo(5.dp.toPx(), 21.dp.toPx())
+                close()
+            }
+            drawPath(note, color, style = Stroke(width = stroke, join = StrokeJoin.Round))
+            drawLine(color, Offset(15.dp.toPx(), 3.dp.toPx()), Offset(15.dp.toPx(), 7.dp.toPx()), stroke)
+            drawLine(color, Offset(15.dp.toPx(), 7.dp.toPx()), Offset(19.dp.toPx(), 7.dp.toPx()), stroke)
+            drawLine(color, Offset(8.dp.toPx(), 11.dp.toPx()), Offset(16.dp.toPx(), 11.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(8.dp.toPx(), 15.dp.toPx()), Offset(16.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(8.dp.toPx(), 19.dp.toPx()), Offset(13.dp.toPx(), 19.dp.toPx()), stroke, StrokeCap.Round)
         }
 
         WorkspaceMode.Draw -> {
-            drawLine(color, Offset(5.dp.toPx(), 17.dp.toPx()), Offset(16.dp.toPx(), 6.dp.toPx()), stroke, StrokeCap.Round)
-            drawLine(color, Offset(14.dp.toPx(), 4.dp.toPx()), Offset(19.dp.toPx(), 9.dp.toPx()), stroke, StrokeCap.Round)
-            drawLine(color, Offset(4.dp.toPx(), 18.dp.toPx()), Offset(10.dp.toPx(), 17.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(6.dp.toPx(), 16.dp.toPx()), Offset(16.dp.toPx(), 6.dp.toPx()), 3.2.dp.toPx(), StrokeCap.Round)
+            drawLine(color, Offset(15.dp.toPx(), 5.dp.toPx()), Offset(19.dp.toPx(), 9.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(5.dp.toPx(), 19.dp.toPx()), Offset(9.dp.toPx(), 18.dp.toPx()), stroke, StrokeCap.Round)
+            drawArc(
+                color = color.copy(alpha = 0.72f),
+                startAngle = 185f,
+                sweepAngle = 165f,
+                useCenter = false,
+                topLeft = Offset(7.dp.toPx(), 15.dp.toPx()),
+                size = Size(12.dp.toPx(), 6.dp.toPx()),
+                style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
+            )
         }
     }
 }
@@ -1476,28 +1653,39 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDrawTargetIcon(
         DrawTarget.Canvas -> {
             drawRoundRect(
                 color = color,
-                topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
-                size = Size(12.dp.toPx(), 12.dp.toPx()),
+                topLeft = Offset(3.dp.toPx(), 4.dp.toPx()),
+                size = Size(14.dp.toPx(), 13.dp.toPx()),
                 style = Stroke(width = stroke),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
             )
-            drawLine(color, Offset(8.dp.toPx(), 4.dp.toPx()), Offset(8.dp.toPx(), 16.dp.toPx()), strokeWidth = 0.9.dp.toPx())
-            drawLine(color, Offset(12.dp.toPx(), 4.dp.toPx()), Offset(12.dp.toPx(), 16.dp.toPx()), strokeWidth = 0.9.dp.toPx())
-            drawLine(color, Offset(4.dp.toPx(), 8.dp.toPx()), Offset(16.dp.toPx(), 8.dp.toPx()), strokeWidth = 0.9.dp.toPx())
-            drawLine(color, Offset(4.dp.toPx(), 12.dp.toPx()), Offset(16.dp.toPx(), 12.dp.toPx()), strokeWidth = 0.9.dp.toPx())
+            drawCircle(color, 1.4.dp.toPx(), Offset(7.dp.toPx(), 8.dp.toPx()), style = Stroke(width = 1.2.dp.toPx()))
+            val landscape = Path().apply {
+                moveTo(5.dp.toPx(), 15.dp.toPx())
+                lineTo(9.dp.toPx(), 11.dp.toPx())
+                lineTo(12.dp.toPx(), 14.dp.toPx())
+                lineTo(15.dp.toPx(), 10.dp.toPx())
+            }
+            drawPath(landscape, color, style = Stroke(width = 1.3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawLine(color, Offset(6.dp.toPx(), 20.dp.toPx()), Offset(14.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(8.dp.toPx(), 17.dp.toPx()), Offset(6.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
+            drawLine(color, Offset(12.dp.toPx(), 17.dp.toPx()), Offset(14.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
         }
 
         DrawTarget.Pdf -> {
-            drawRoundRect(
-                color = color,
-                topLeft = Offset(5.dp.toPx(), 3.dp.toPx()),
-                size = Size(10.dp.toPx(), 14.dp.toPx()),
-                style = Stroke(width = stroke),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx())
-            )
-            drawLine(color, Offset(8.dp.toPx(), 8.dp.toPx()), Offset(13.dp.toPx(), 8.dp.toPx()), strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(color, Offset(8.dp.toPx(), 11.dp.toPx()), Offset(13.dp.toPx(), 11.dp.toPx()), strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(color, Offset(8.dp.toPx(), 14.dp.toPx()), Offset(11.dp.toPx(), 14.dp.toPx()), strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
+            val document = Path().apply {
+                moveTo(4.dp.toPx(), 2.dp.toPx())
+                lineTo(13.dp.toPx(), 2.dp.toPx())
+                lineTo(18.dp.toPx(), 7.dp.toPx())
+                lineTo(18.dp.toPx(), 19.dp.toPx())
+                lineTo(4.dp.toPx(), 19.dp.toPx())
+                close()
+            }
+            drawPath(document, color, style = Stroke(width = stroke, join = StrokeJoin.Round))
+            drawLine(color, Offset(13.dp.toPx(), 2.dp.toPx()), Offset(13.dp.toPx(), 7.dp.toPx()), stroke)
+            drawLine(color, Offset(13.dp.toPx(), 7.dp.toPx()), Offset(18.dp.toPx(), 7.dp.toPx()), stroke)
+            drawLine(color, Offset(7.dp.toPx(), 11.dp.toPx()), Offset(15.dp.toPx(), 11.dp.toPx()), 1.2.dp.toPx(), StrokeCap.Round)
+            drawLine(color, Offset(7.dp.toPx(), 14.dp.toPx()), Offset(15.dp.toPx(), 14.dp.toPx()), 1.2.dp.toPx(), StrokeCap.Round)
+            drawLine(color, Offset(7.dp.toPx(), 17.dp.toPx()), Offset(11.dp.toPx(), 17.dp.toPx()), 1.2.dp.toPx(), StrokeCap.Round)
         }
     }
 }
@@ -1567,6 +1755,35 @@ private fun argbColor(value: Long): Color {
     return Color(value.toInt())
 }
 
+private fun WorkspaceDrawTool.accessibleLabel(): String {
+    return when (this) {
+        WorkspaceDrawTool.Pen -> "Pen tool"
+        WorkspaceDrawTool.Marker -> "Text marker tool"
+        WorkspaceDrawTool.Move -> "Move canvas or PDF"
+        WorkspaceDrawTool.Eraser -> "Eraser tool"
+    }
+}
+
+private fun WorkspaceMode.accessibleLabel(): String {
+    return when (this) {
+        WorkspaceMode.Notes -> "Open notes"
+        WorkspaceMode.Draw -> "Open drawing tools"
+    }
+}
+
+private fun DrawTarget.accessibleLabel(): String {
+    return when (this) {
+        DrawTarget.Canvas -> "Draw on separate canvas"
+        DrawTarget.Pdf -> "Draw directly on PDF"
+    }
+}
+
+private fun DrawActionIcon.accessibleLabel(): String {
+    return when (this) {
+        DrawActionIcon.Undo -> "Undo last drawing"
+    }
+}
+
 private enum class DrawActionIcon {
     Undo
 }
@@ -1583,12 +1800,16 @@ private val DRAW_COLORS = listOf(
 
 private val STROKE_WIDTHS = listOf(22f, 34f, 48f)
 
-private const val DRAW_CANVAS_WIDTH = 5000f
-private const val DRAW_CANVAS_HEIGHT = 7000f
-private const val INITIAL_CANVAS_SCALE = 0.22f
-private const val MIN_CANVAS_SCALE = 0.08f
+private const val DRAW_CANVAS_WIDTH = DEFAULT_CANVAS_WIDTH
+private const val DRAW_CANVAS_HEIGHT = DEFAULT_CANVAS_HEIGHT
+private const val INITIAL_CANVAS_SCALE = 0.05f
+private const val MIN_CANVAS_SCALE = 0.02f
 private const val MAX_CANVAS_SCALE = 0.9f
-private const val MIN_CANVAS_INK_POINT_DISTANCE = 4f
+private const val DEFAULT_CANVAS_REGION_SIZE = 2_000f
+private const val MIN_CANVAS_INK_POINT_DISTANCE = 2f
 private const val CANVAS_ERASER_SAMPLE_DISTANCE = 24f
 private const val CANVAS_ERASER_RADIUS = 120f
+private const val CANVAS_GRID_BASE_STEP = 120f
+private const val CANVAS_GRID_MIN_SCREEN_STEP = 18f
+private const val CANVAS_GRID_MAJOR_INTERVAL = 5
 private const val WORKSPACE_HANDLE_TAP_SLOP_PX = 18f

@@ -134,6 +134,7 @@ import com.example.carrotpdf.workspace.WorkspaceCanvas
 import com.example.carrotpdf.workspace.WorkspaceRepository
 import com.example.carrotpdf.workspace.exportWorkspaceData
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -199,6 +200,8 @@ private fun CarrotPdfContent(
     var selectedExternalLink by remember { mutableStateOf<String?>(null) }
     var selectedTextSelection by remember { mutableStateOf<PdfTextSelection?>(null) }
     var textSelectionDragGeneration by remember { mutableIntStateOf(0) }
+    var textMarkerPreviewGeneration by remember { mutableIntStateOf(0) }
+    val textMarkerPreviewJob = remember { arrayOfNulls<Job>(1) }
     var isCapturingScreenshot by remember { mutableStateOf(false) }
     var currentPaperBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
     var reimportingTabId by remember { mutableStateOf<String?>(null) }
@@ -213,6 +216,7 @@ private fun CarrotPdfContent(
     var workspaceCanvasStrokes by remember { mutableStateOf<List<CanvasInkStroke>>(emptyList()) }
     var workspacePageInkStrokes by remember { mutableStateOf<List<PageInkStroke>>(emptyList()) }
     var workspaceTextMarkers by remember { mutableStateOf<List<PageTextMarker>>(emptyList()) }
+    var workspaceTextMarkerPreview by remember { mutableStateOf<List<PageTextMarker>>(emptyList()) }
     var loadedWorkspaceTabId by remember { mutableStateOf<String?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
@@ -649,6 +653,9 @@ private fun CarrotPdfContent(
         workspaceCanvasStrokes = emptyList()
         workspacePageInkStrokes = emptyList()
         workspaceTextMarkers = emptyList()
+        workspaceTextMarkerPreview = emptyList()
+        textMarkerPreviewJob[0]?.cancel()
+        textMarkerPreviewJob[0] = null
 
         val tab = activeTab ?: return@LaunchedEffect
 
@@ -719,6 +726,15 @@ private fun CarrotPdfContent(
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+        }
+    }
+
+    LaunchedEffect(isPdfMarkerActive) {
+        if (!isPdfMarkerActive) {
+            textMarkerPreviewGeneration += 1
+            textMarkerPreviewJob[0]?.cancel()
+            textMarkerPreviewJob[0] = null
+            workspaceTextMarkerPreview = emptyList()
         }
     }
 
@@ -850,7 +866,32 @@ private fun CarrotPdfContent(
                 .fillMaxSize()
                 .background(CarrotColors.PdfCanvas)
         ) {
-            val isTabletWorkspace = maxWidth >= TABLET_WORKSPACE_BREAKPOINT
+            val useSideWorkspace = isWorkspaceOpen &&
+                !isWorkspaceExpanded &&
+                !(workspaceMode == WorkspaceMode.Draw && workspaceDrawTarget == DrawTarget.Pdf) &&
+                maxWidth >= TABLET_WORKSPACE_BREAKPOINT &&
+                maxWidth > maxHeight
+            val sideWorkspaceWidth = (maxWidth * TABLET_WORKSPACE_WIDTH_RATIO)
+                .coerceIn(TABLET_WORKSPACE_MIN_WIDTH, TABLET_WORKSPACE_MAX_WIDTH)
+            val maximumBottomWorkspaceHeight = maxHeight.coerceAtLeast(0.dp)
+            val preferredBottomWorkspaceHeight = if (
+                workspaceMode == WorkspaceMode.Draw &&
+                workspaceDrawTarget == DrawTarget.Pdf
+            ) {
+                WORKSPACE_PDF_DRAW_HEIGHT
+            } else if (isWorkspaceExpanded) {
+                (maxHeight - statusBarTop - TOP_BAR_HEIGHT - navigationBarBottom - 12.dp)
+            } else {
+                WORKSPACE_DEFAULT_HEIGHT
+            }
+            val minimumBottomWorkspaceHeight = minOf(
+                WORKSPACE_DEFAULT_HEIGHT,
+                maximumBottomWorkspaceHeight
+            )
+            val bottomWorkspaceHeight = preferredBottomWorkspaceHeight.coerceIn(
+                minimumValue = minimumBottomWorkspaceHeight,
+                maximumValue = maximumBottomWorkspaceHeight
+            )
 
             ReaderStage(
                 activeTab = activeTab,
@@ -863,7 +904,8 @@ private fun CarrotPdfContent(
                 suppressPageOverlays = isCapturingScreenshot,
                 pageSizes = activeTab?.pageSizes.orEmpty(),
                 pageInkStrokes = workspacePageInkStrokes,
-                pageTextMarkers = workspaceTextMarkers,
+                pageTextMarkers = (workspaceTextMarkers + workspaceTextMarkerPreview)
+                    .distinctBy { marker -> marker.stableMarkerKey() },
                 isPdfInkActive = isPdfInkActive,
                 isPdfMarkerActive = isPdfMarkerActive,
                 pdfInkTool = activePdfInkTool,
@@ -946,18 +988,29 @@ private fun CarrotPdfContent(
                         erasePoints = points
                     )
                 },
-                onPdfTextMarkerGesture = { pageIndex, points ->
+                onPdfTextMarkerGesture = { pageIndex, points, visualScale, commit ->
                     val session = activeTextIndexSession ?: return@ReaderStage
                     val tabId = activeTabId
+                    val requestId = ++textMarkerPreviewGeneration
 
                     selectedExternalLink = null
                     selectedTextSelection = null
-                    coroutineScope.launch {
+
+                    if (points.isEmpty()) {
+                        textMarkerPreviewJob[0]?.cancel()
+                        textMarkerPreviewJob[0] = null
+                        workspaceTextMarkerPreview = emptyList()
+                        return@ReaderStage
+                    }
+
+                    textMarkerPreviewJob[0]?.cancel()
+                    textMarkerPreviewJob[0] = coroutineScope.launch {
                         val markers = withContext(Dispatchers.IO) {
                             runCatching {
                                 session.markerSelectionsForPoints(
                                     pageIndex = pageIndex,
-                                    points = points.map { point -> point.x to point.y }
+                                    points = points.map { point -> point.x to point.y },
+                                    hitToleranceScale = 1f / visualScale.coerceAtLeast(1f)
                                 ).map { selection ->
                                     selection.toPageTextMarker(
                                         color = workspaceInkColor
@@ -966,13 +1019,23 @@ private fun CarrotPdfContent(
                             }.getOrDefault(emptyList())
                         }
 
-                        if (activeTabId == tabId && markers.isNotEmpty()) {
-                            workspaceTextMarkers = (workspaceTextMarkers + markers)
-                                .distinctBy { marker -> marker.stableMarkerKey() }
+                        if (
+                            activeTabId == tabId &&
+                            requestId == textMarkerPreviewGeneration
+                        ) {
+                            if (commit) {
+                                if (markers.isNotEmpty()) {
+                                    workspaceTextMarkers = (workspaceTextMarkers + markers)
+                                        .distinctBy { marker -> marker.stableMarkerKey() }
+                                }
+                                workspaceTextMarkerPreview = emptyList()
+                            } else {
+                                workspaceTextMarkerPreview = markers
+                            }
                         }
                     }
                 },
-                onTextLongPress = { pageIndex, normalizedX, normalizedY ->
+                onTextLongPress = { pageIndex, normalizedX, normalizedY, visualScale ->
                     val session = activeTextIndexSession ?: return@ReaderStage
                     val tabId = activeTabId
 
@@ -983,7 +1046,8 @@ private fun CarrotPdfContent(
                                 session.wordAt(
                                     pageIndex = pageIndex,
                                     normalizedX = normalizedX,
-                                    normalizedY = normalizedY
+                                    normalizedY = normalizedY,
+                                    hitToleranceScale = 1f / visualScale.coerceAtLeast(1f)
                                 )
                             }.getOrNull()
                         }
@@ -1067,6 +1131,13 @@ private fun CarrotPdfContent(
                 },
                 onCurrentPageBoundsChange = { bounds ->
                     currentPaperBoundsInWindow = bounds
+                },
+                modifier = if (useSideWorkspace) {
+                    Modifier.padding(end = sideWorkspaceWidth + TABLET_WORKSPACE_OUTER_GAP)
+                } else if (isWorkspaceOpen) {
+                    Modifier.padding(bottom = bottomWorkspaceHeight)
+                } else {
+                    Modifier
                 }
             )
 
@@ -1300,15 +1371,6 @@ private fun CarrotPdfContent(
                 activeTab != null &&
                 !isCapturingScreenshot
             ) {
-                val mobileWorkspaceHeight = if (isWorkspaceExpanded) {
-                    (maxHeight - statusBarTop - TOP_BAR_HEIGHT - navigationBarBottom - 12.dp)
-                        .coerceAtLeast(WORKSPACE_DEFAULT_HEIGHT)
-                } else if (workspaceMode == WorkspaceMode.Draw && workspaceDrawTarget == DrawTarget.Pdf) {
-                    WORKSPACE_PDF_DRAW_HEIGHT
-                } else {
-                    WORKSPACE_DEFAULT_HEIGHT
-                }
-
                 NotesWorkspaceSheet(
                     notesText = workspaceNotesText,
                     onNotesChange = { text ->
@@ -1359,15 +1421,15 @@ private fun CarrotPdfContent(
                     onExpandedChange = { expanded ->
                         isWorkspaceExpanded = expanded
                     },
-                    layout = if (isTabletWorkspace) {
+                    layout = if (useSideWorkspace) {
                         WorkspaceSheetLayout.Side
                     } else {
                         WorkspaceSheetLayout.Bottom
                     },
-                    modifier = if (isTabletWorkspace) {
+                    modifier = if (useSideWorkspace) {
                         Modifier
                             .align(Alignment.CenterEnd)
-                            .width(400.dp)
+                            .width(sideWorkspaceWidth)
                             .padding(
                                 top = statusBarTop + TOP_BAR_HEIGHT + 8.dp,
                                 end = 14.dp,
@@ -1376,7 +1438,7 @@ private fun CarrotPdfContent(
                     } else {
                         Modifier
                             .align(Alignment.BottomCenter)
-                            .height(mobileWorkspaceHeight)
+                            .height(bottomWorkspaceHeight)
                             .padding(bottom = navigationBarBottom)
                     }
                 )
@@ -1904,8 +1966,12 @@ const val DEFAULT_WORKSPACE_STROKE_WIDTH = 34f
 const val PDF_INK_WIDTH_DENOMINATOR = 7000f
 const val TEXT_MARKER_ERASER_PADDING = 0.018f
 val WORKSPACE_DEFAULT_HEIGHT = 326.dp
-val WORKSPACE_PDF_DRAW_HEIGHT = 226.dp
-val TABLET_WORKSPACE_BREAKPOINT = 700.dp
+val WORKSPACE_PDF_DRAW_HEIGHT = 196.dp
+val TABLET_WORKSPACE_BREAKPOINT = 900.dp
+val TABLET_WORKSPACE_MIN_WIDTH = 320.dp
+val TABLET_WORKSPACE_MAX_WIDTH = 440.dp
+val TABLET_WORKSPACE_OUTER_GAP = 14.dp
+const val TABLET_WORKSPACE_WIDTH_RATIO = 0.34f
 const val PAGE_INK_ERASER_RADIUS = 0.022f
 
 private fun Float.toPdfInkWidth(): Float {

@@ -250,11 +250,14 @@ private fun Long.toPdfRgb(): PdfRgb {
 }
 
 private fun String.ensurePdfFileName(): String {
-    return if (endsWith(".pdf", ignoreCase = true)) {
-        this
-    } else {
-        "$this.pdf"
-    }
+    val stem = if (endsWith(".pdf", ignoreCase = true)) dropLast(4) else this
+
+    return stem
+        .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "-")
+        .trim(' ', '.', '-')
+        .take(MAX_EXPORTED_FILE_STEM_LENGTH)
+        .ifBlank { "carrot-pdf" }
+        .plus(".pdf")
 }
 
 private fun String.annotatedCacheFileName(): String {
@@ -285,6 +288,8 @@ private data class PdfPoint(
     val x: Float,
     val y: Float
 )
+
+private const val MAX_EXPORTED_FILE_STEM_LENGTH = 96
 
 private data class PdfRect(
     val x: Float,

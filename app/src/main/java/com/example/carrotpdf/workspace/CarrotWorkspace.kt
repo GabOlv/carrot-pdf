@@ -92,8 +92,8 @@ enum class InkTool {
     Eraser
 }
 
-internal const val DEFAULT_CANVAS_WIDTH = 5000f
-internal const val DEFAULT_CANVAS_HEIGHT = 7000f
+internal const val DEFAULT_CANVAS_WIDTH = 16_000f
+internal const val DEFAULT_CANVAS_HEIGHT = 22_000f
 
 internal fun CarrotWorkspace.toJson(): JSONObject {
     return JSONObject()

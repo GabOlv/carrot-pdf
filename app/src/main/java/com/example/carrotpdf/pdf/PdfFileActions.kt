@@ -221,11 +221,13 @@ private class UriPrintDocumentAdapter(
 }
 
 private fun String.ensurePdfFileName(): String {
-    return if (endsWith(".pdf", ignoreCase = true)) {
-        this
-    } else {
-        "$this.pdf"
-    }
+    val stem = (if (endsWith(".pdf", ignoreCase = true)) dropLast(4) else this)
+        .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "-")
+        .trim(' ', '.', '-')
+        .take(MAX_EXPORTED_FILE_STEM_LENGTH)
+        .ifBlank { "carrot-pdf" }
+
+    return "$stem.pdf"
 }
 
 private fun String.safeImageFileStem(): String {
@@ -241,3 +243,5 @@ private fun screenshotTimestamp(): String {
         DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
     )
 }
+
+private const val MAX_EXPORTED_FILE_STEM_LENGTH = 96

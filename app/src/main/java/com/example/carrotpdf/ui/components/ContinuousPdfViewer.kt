@@ -109,8 +109,18 @@ fun ContinuousPdfViewer(
     onLinkTap: (PdfLinkRegion) -> Unit = {},
     onPdfInkStroke: (PageInkStroke) -> Unit = {},
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit = { _, _ -> },
-    onPdfTextMarkerGesture: (pageIndex: Int, points: List<InkPoint>) -> Unit = { _, _ -> },
-    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit = { _, _, _ -> },
+    onPdfTextMarkerGesture: (
+        pageIndex: Int,
+        points: List<InkPoint>,
+        visualScale: Float,
+        commit: Boolean
+    ) -> Unit = { _, _, _, _ -> },
+    onTextLongPress: (
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float,
+        visualScale: Float
+    ) -> Unit = { _, _, _, _ -> },
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
         pageIndex: Int,
@@ -133,8 +143,12 @@ fun ContinuousPdfViewer(
     val density = LocalDensity.current
 
     val screenWidth = configuration.screenWidthDp.dp
+    val actualViewportWidth = viewerState.viewportState.viewportSize.width
+        .takeIf { width -> width > 0 }
+        ?.let { width -> with(density) { width.toDp() } }
+        ?: screenWidth
     val pageLayout = rememberPdfPageLayout(
-        viewportWidth = screenWidth
+        viewportWidth = actualViewportWidth
     )
     val documentGeometry = remember(
         viewerState.documentId,
@@ -487,6 +501,7 @@ fun ContinuousPdfViewer(
                                 pdfInkTool = pdfInkTool,
                                 pdfInkColor = pdfInkColor,
                                 pdfInkWidth = pdfInkWidth,
+                                visualScale = scale,
                                 selectedTextSelection = selectedTextSelection
                                     ?.takeIf { selection -> selection.hasSelectionOnPage(pageIndex) },
                                 suppressPageOverlays = suppressPageOverlays,
@@ -557,13 +572,24 @@ private fun PdfPageItem(
     pdfInkTool: InkTool,
     pdfInkColor: Long,
     pdfInkWidth: Float,
+    visualScale: Float,
     selectedTextSelection: PdfTextSelection?,
     suppressPageOverlays: Boolean,
     onLinkTap: (PdfLinkRegion) -> Unit,
     onPdfInkStroke: (PageInkStroke) -> Unit,
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
-    onPdfTextMarkerGesture: (pageIndex: Int, points: List<InkPoint>) -> Unit,
-    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
+    onPdfTextMarkerGesture: (
+        pageIndex: Int,
+        points: List<InkPoint>,
+        visualScale: Float,
+        commit: Boolean
+    ) -> Unit,
+    onTextLongPress: (
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float,
+        visualScale: Float
+    ) -> Unit,
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
         pageIndex: Int,
@@ -705,12 +731,14 @@ private fun PdfPageItem(
                         } else if (isPdfMarkerActive) {
                             PdfTextMarkerInputOverlay(
                                 pageIndex = pageIndex,
+                                visualScale = visualScale,
                                 onMarkerGesture = onPdfTextMarkerGesture,
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
                             PdfPageInteractionOverlay(
                                 pageIndex = pageIndex,
+                                visualScale = visualScale,
                                 linkRegions = linkRegions,
                                 selectedTextSelection = selectedTextSelection,
                                 onLinkTap = onLinkTap,
@@ -890,10 +918,17 @@ private fun PdfPageInkOverlay(
 @Composable
 private fun PdfTextMarkerInputOverlay(
     pageIndex: Int,
-    onMarkerGesture: (pageIndex: Int, points: List<InkPoint>) -> Unit,
+    visualScale: Float,
+    onMarkerGesture: (
+        pageIndex: Int,
+        points: List<InkPoint>,
+        visualScale: Float,
+        commit: Boolean
+    ) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentOnMarkerGesture = rememberUpdatedState(onMarkerGesture)
+    val currentVisualScale = rememberUpdatedState(visualScale)
 
     Box(
         modifier = modifier.pointerInput(pageIndex) {
@@ -916,6 +951,9 @@ private fun PdfTextMarkerInputOverlay(
                     )
                 )
                 var isMultiTouchGesture = false
+                var lastPreviewAtMillis = 0L
+
+                currentOnMarkerGesture.value(pageIndex, points, currentVisualScale.value, false)
 
                 while (true) {
                     val event = awaitPointerEvent()
@@ -929,7 +967,7 @@ private fun PdfTextMarkerInputOverlay(
                             event.changes.forEach { change ->
                                 change.consume()
                             }
-                            currentOnMarkerGesture.value(pageIndex, points)
+                            currentOnMarkerGesture.value(pageIndex, points, currentVisualScale.value, true)
                         }
                         break
                     }
@@ -956,6 +994,7 @@ private fun PdfTextMarkerInputOverlay(
                     if (!isStylusGesture && pressedChanges.size >= 2) {
                         isMultiTouchGesture = true
                         points = emptyList()
+                        currentOnMarkerGesture.value(pageIndex, emptyList(), currentVisualScale.value, false)
                         continue
                     }
 
@@ -969,6 +1008,13 @@ private fun PdfTextMarkerInputOverlay(
                             point = nextPoint,
                             minDistance = MIN_PDF_MARKER_POINT_DISTANCE
                         )
+                        if (
+                            change.uptimeMillis - lastPreviewAtMillis >=
+                            PDF_MARKER_PREVIEW_INTERVAL_MS
+                        ) {
+                            lastPreviewAtMillis = change.uptimeMillis
+                            currentOnMarkerGesture.value(pageIndex, points, currentVisualScale.value, false)
+                        }
                         pressedChanges.forEach { pressedChange ->
                             if (isStylusGesture || pressedChange.id == activePointerId) {
                                 pressedChange.consume()
@@ -1106,12 +1152,24 @@ private fun PdfPageInkInputOverlay(
                             height = canvasHeight,
                             pressure = change.pressure
                         )
-                        points = points.appendInkPointIfFarEnough(
+                        val previousPoint = points.lastOrNull()
+                        val updatedPoints = points.appendInkPointIfFarEnough(
                             point = nextPoint,
                             minDistance = MIN_PDF_INK_POINT_DISTANCE
                         )
+                        val addedPoint = updatedPoints.size > points.size
+                        points = updatedPoints
                         if (effectiveTool == InkTool.Pen) {
                             currentOnPreviewChange.value(points)
+                        } else if (
+                            effectiveTool == InkTool.Eraser &&
+                            addedPoint &&
+                            previousPoint != null
+                        ) {
+                            currentOnErase.value(
+                                pageIndex,
+                                listOf(previousPoint, nextPoint)
+                            )
                         }
                         pressedChanges.forEach { pressedChange ->
                             if (isStylusGesture || pressedChange.id == activePointerId) {
@@ -1449,10 +1507,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSelectionHandle
 @Composable
 private fun PdfPageInteractionOverlay(
     pageIndex: Int,
+    visualScale: Float,
     linkRegions: List<PdfLinkRegion>,
     selectedTextSelection: PdfTextSelection?,
     onLinkTap: (PdfLinkRegion) -> Unit,
-    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
+    onTextLongPress: (
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float,
+        visualScale: Float
+    ) -> Unit,
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
         pageIndex: Int,
@@ -1468,6 +1532,7 @@ private fun PdfPageInteractionOverlay(
     val handleStemPx = with(density) { TEXT_SELECTION_HANDLE_STEM.toPx() }
     val currentSelection = rememberUpdatedState(selectedTextSelection)
     val currentHandleDrag = rememberUpdatedState(onTextSelectionHandleDrag)
+    val currentVisualScale = rememberUpdatedState(visualScale)
     var selectedLink by remember(linkRegions) {
         mutableStateOf<PdfLinkRegion?>(null)
     }
@@ -1598,7 +1663,8 @@ private fun PdfPageInteractionOverlay(
                         onTextLongPress(
                             pageIndex,
                             (lastPosition.x / size.width.toFloat()).coerceIn(0f, 1f),
-                            (lastPosition.y / size.height.toFloat()).coerceIn(0f, 1f)
+                            (lastPosition.y / size.height.toFloat()).coerceIn(0f, 1f),
+                            currentVisualScale.value
                         )
                     }
 
@@ -1694,6 +1760,7 @@ private const val DEFAULT_PDF_INK_COLOR = 0xFFFF7A1AL
 private const val DEFAULT_PDF_INK_WIDTH = 0.0048f
 private const val MIN_PDF_INK_POINT_DISTANCE = 0.0018f
 private const val MIN_PDF_MARKER_POINT_DISTANCE = 0.008f
+private const val PDF_MARKER_PREVIEW_INTERVAL_MS = 42L
 private const val TEXT_MARKER_ALPHA = 0.29f
 private val PDF_INK_SCROLL_STRIP_WIDTH = 44.dp
 private val TEXT_SELECTION_HANDLE_STEM = 5.dp

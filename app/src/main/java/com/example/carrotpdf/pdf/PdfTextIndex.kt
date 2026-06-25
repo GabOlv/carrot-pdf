@@ -9,6 +9,7 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.ceil
 import kotlin.math.floor
 
 internal data class PdfTextIndexedPage(
@@ -71,13 +72,15 @@ internal class PdfTextIndexSession(
     suspend fun wordAt(
         pageIndex: Int,
         normalizedX: Float,
-        normalizedY: Float
+        normalizedY: Float,
+        hitToleranceScale: Float = 1f
     ): PdfTextSelection? {
         return pages()
             .getOrNull(pageIndex)
             ?.wordAt(
                 normalizedX = normalizedX,
-                normalizedY = normalizedY
+                normalizedY = normalizedY,
+                hitToleranceScale = hitToleranceScale
             )
     }
 
@@ -99,15 +102,19 @@ internal class PdfTextIndexSession(
 
     suspend fun markerSelectionsForPoints(
         pageIndex: Int,
-        points: List<Pair<Float, Float>>
+        points: List<Pair<Float, Float>>,
+        hitToleranceScale: Float = 1f
     ): List<PdfTextSelection> {
         val page = pages().getOrNull(pageIndex) ?: return emptyList()
         val seenRanges = mutableSetOf<String>()
 
-        return points.mapNotNull { (normalizedX, normalizedY) ->
+        return points
+            .interpolateMarkerPath()
+            .mapNotNull { (normalizedX, normalizedY) ->
             val selection = page.wordAt(
                 normalizedX = normalizedX,
-                normalizedY = normalizedY
+                normalizedY = normalizedY,
+                hitToleranceScale = hitToleranceScale
             ) ?: return@mapNotNull null
             val key = selection.pageRanges.joinToString(separator = "|") { range ->
                 "${range.pageIndex}:${range.startIndex}:${range.endExclusive}"
@@ -118,7 +125,7 @@ internal class PdfTextIndexSession(
             } else {
                 null
             }
-        }
+            }
     }
 
     suspend fun pages(): List<PdfTextIndexedPage> {
@@ -143,7 +150,8 @@ internal class PdfTextIndexSession(
 
 private fun PdfTextIndexedPage.wordAt(
     normalizedX: Float,
-    normalizedY: Float
+    normalizedY: Float,
+    hitToleranceScale: Float = 1f
 ): PdfTextSelection? {
     if (
         text.isBlank() ||
@@ -162,7 +170,8 @@ private fun PdfTextIndexedPage.wordAt(
         ?.takeIf { glyph ->
             glyph.isNear(
                 x = pageX,
-                y = pageY
+                y = pageY,
+                toleranceScale = hitToleranceScale
             )
         } ?: return null
 
@@ -490,8 +499,36 @@ private fun PdfTextIndexedPage.sourceIndexClosestTo(
 
     return glyphs
         .filter { glyph -> glyph.hasReliableBounds(pageWidth, pageHeight) }
-        .minByOrNull { glyph -> glyph.hitDistanceSquared(pageX, pageY) }
+        .minByOrNull { glyph -> glyph.selectionDistanceSquared(pageX, pageY) }
         ?.sourceIndex
+}
+
+private fun List<Pair<Float, Float>>.interpolateMarkerPath(): List<Pair<Float, Float>> {
+    if (size < 2) {
+        return this
+    }
+
+    val interpolated = mutableListOf(first())
+
+    zipWithNext().forEach { (start, end) ->
+        val dx = end.first - start.first
+        val dy = end.second - start.second
+        val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+        val steps = ceil(distance / MARKER_PATH_MAX_SAMPLE_DISTANCE)
+            .toInt()
+            .coerceIn(1, MARKER_PATH_MAX_INTERPOLATION_STEPS)
+
+        for (step in 1..steps) {
+            val progress = step.toFloat() / steps.toFloat()
+            interpolated += (
+                start.first + dx * progress
+                ) to (
+                start.second + dy * progress
+                )
+        }
+    }
+
+    return interpolated
 }
 
 private fun PdfTextIndexedPage.boundsForRange(
@@ -612,12 +649,32 @@ private fun PdfTextGlyph.hitDistanceSquared(
     return (dx * dx) + (dy * dy)
 }
 
-private fun PdfTextGlyph.isNear(
+private fun PdfTextGlyph.selectionDistanceSquared(
     x: Float,
     y: Float
+): Float {
+    val nearestX = x.coerceIn(left, right)
+    val nearestY = y.coerceIn(top, bottom)
+    val dx = x - nearestX
+    val dy = y - nearestY
+
+    return (dx * dx) + (dy * dy * TEXT_SELECTION_VERTICAL_DISTANCE_WEIGHT)
+}
+
+private fun PdfTextGlyph.isNear(
+    x: Float,
+    y: Float,
+    toleranceScale: Float = 1f
 ): Boolean {
-    val horizontalTolerance = maxOf(TEXT_HIT_MIN_TOLERANCE_PT, width * TEXT_HIT_WIDTH_TOLERANCE_RATIO)
-    val verticalTolerance = maxOf(TEXT_HIT_MIN_TOLERANCE_PT, height * TEXT_HIT_HEIGHT_TOLERANCE_RATIO)
+    val safeToleranceScale = toleranceScale.coerceIn(0.20f, 1.5f)
+    val horizontalTolerance = maxOf(
+        TEXT_HIT_MIN_HORIZONTAL_TOLERANCE_PT,
+        width * TEXT_HIT_WIDTH_TOLERANCE_RATIO
+    ) * safeToleranceScale
+    val verticalTolerance = maxOf(
+        TEXT_HIT_MIN_VERTICAL_TOLERANCE_PT,
+        height * TEXT_HIT_HEIGHT_TOLERANCE_RATIO
+    ) * safeToleranceScale
 
     return x >= left - horizontalTolerance &&
         x <= right + horizontalTolerance &&
@@ -831,8 +888,12 @@ private fun TextPosition.toGlyph(
     )
 }
 
-private const val TEXT_HIT_MIN_TOLERANCE_PT = 3f
-private const val TEXT_HIT_WIDTH_TOLERANCE_RATIO = 0.65f
-private const val TEXT_HIT_HEIGHT_TOLERANCE_RATIO = 0.85f
+private const val TEXT_HIT_MIN_HORIZONTAL_TOLERANCE_PT = 2.5f
+private const val TEXT_HIT_MIN_VERTICAL_TOLERANCE_PT = 1.25f
+private const val TEXT_HIT_WIDTH_TOLERANCE_RATIO = 0.50f
+private const val TEXT_HIT_HEIGHT_TOLERANCE_RATIO = 0.38f
 private const val TEXT_SELECTION_UPSHIFT_RATIO = 0.92f
 private const val TEXT_SELECTION_VERTICAL_INSET_RATIO = 0.04f
+private const val TEXT_SELECTION_VERTICAL_DISTANCE_WEIGHT = 4f
+private const val MARKER_PATH_MAX_SAMPLE_DISTANCE = 0.0035f
+private const val MARKER_PATH_MAX_INTERPOLATION_STEPS = 48

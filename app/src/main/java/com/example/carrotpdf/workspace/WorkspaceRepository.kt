@@ -64,12 +64,18 @@ class WorkspaceRepository(
         val now = System.currentTimeMillis()
         val workspace = loadOrCreate(tab)
 
-        if (workspace.canvas.strokes == strokes) {
+        if (
+            workspace.canvas.strokes == strokes &&
+            workspace.canvas.width >= DEFAULT_CANVAS_WIDTH &&
+            workspace.canvas.height >= DEFAULT_CANVAS_HEIGHT
+        ) {
             return workspace
         }
 
         val updated = workspace.copy(
             canvas = workspace.canvas.copy(
+                width = maxOf(workspace.canvas.width, DEFAULT_CANVAS_WIDTH),
+                height = maxOf(workspace.canvas.height, DEFAULT_CANVAS_HEIGHT),
                 strokes = strokes,
                 updatedAt = now
             ),

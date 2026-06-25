@@ -152,8 +152,18 @@ fun ReaderStage(
     onLinkTap: (PdfLinkRegion) -> Unit,
     onPdfInkStroke: (PageInkStroke) -> Unit,
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
-    onPdfTextMarkerGesture: (pageIndex: Int, points: List<InkPoint>) -> Unit,
-    onTextLongPress: (pageIndex: Int, normalizedX: Float, normalizedY: Float) -> Unit,
+    onPdfTextMarkerGesture: (
+        pageIndex: Int,
+        points: List<InkPoint>,
+        visualScale: Float,
+        commit: Boolean
+    ) -> Unit,
+    onTextLongPress: (
+        pageIndex: Int,
+        normalizedX: Float,
+        normalizedY: Float,
+        visualScale: Float
+    ) -> Unit,
     onTextSelectionHandleDrag: (
         handle: PdfTextSelectionHandle,
         pageIndex: Int,
@@ -164,10 +174,11 @@ fun ReaderStage(
     onCurrentPageChange: (Int) -> Unit,
     onZoomCommitted: (Float) -> Unit,
     onViewportOriginChange: (leftPx: Float, topPx: Float) -> Unit,
-    onCurrentPageBoundsChange: (androidx.compose.ui.geometry.Rect) -> Unit
+    onCurrentPageBoundsChange: (androidx.compose.ui.geometry.Rect) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .background(CarrotColors.PdfCanvas)
             .pointerInput(activeTab?.id) {

@@ -110,7 +110,15 @@ private fun exportNotesPdf(
                 var y = margin
 
                 if (pageNumber == 1) {
-                    canvas.drawText(title, margin, y, titlePaint)
+                    canvas.drawText(
+                        title.ellipsizeToWidth(
+                            paint = titlePaint,
+                            maxWidth = textWidth
+                        ),
+                        margin,
+                        y,
+                        titlePaint
+                    )
                     y += 34f
                 }
 
@@ -263,6 +271,28 @@ private fun String.wrapToWidth(
     }
 
     return lines.ifEmpty { listOf("") }
+}
+
+private fun String.ellipsizeToWidth(
+    paint: Paint,
+    maxWidth: Float
+): String {
+    if (paint.measureText(this) <= maxWidth) {
+        return this
+    }
+
+    val suffix = "..."
+    var end = length
+
+    while (end > 0 && paint.measureText(substring(0, end) + suffix) > maxWidth) {
+        end -= 1
+    }
+
+    return if (end > 0) {
+        substring(0, end).trimEnd() + suffix
+    } else {
+        suffix
+    }
 }
 
 private fun Context.createDownloadUri(
