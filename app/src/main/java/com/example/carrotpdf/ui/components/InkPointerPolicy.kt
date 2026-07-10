@@ -12,6 +12,28 @@ internal fun PointerInputChange.isStylusEraserPointer(): Boolean {
     return type == PointerType.Eraser
 }
 
+internal fun shouldRejectContactForPalmRejection(
+    stylusActive: Boolean,
+    contactIsStylus: Boolean
+): Boolean {
+    return stylusActive && !contactIsStylus
+}
+
+internal fun List<PointerInputChange>.consumePalmContactsWhenStylusActive(
+    stylusActive: Boolean
+) {
+    forEach { change ->
+        if (
+            shouldRejectContactForPalmRejection(
+                stylusActive = stylusActive,
+                contactIsStylus = change.isStylusLikePointer()
+            )
+        ) {
+            change.consume()
+        }
+    }
+}
+
 internal fun List<PointerInputChange>.preferredInkChange(
     activePointerId: PointerId?
 ): PointerInputChange? {

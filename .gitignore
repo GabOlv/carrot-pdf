@@ -21,3 +21,5 @@ keystore.properties
 *.zip
 app/release/
 .idea/inspectionProfiles/Project_Default.xml
+
+.temp

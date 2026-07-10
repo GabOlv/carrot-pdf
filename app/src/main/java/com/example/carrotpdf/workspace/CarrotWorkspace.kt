@@ -11,6 +11,7 @@ data class CarrotWorkspace(
     val canvas: WorkspaceCanvas = WorkspaceCanvas(),
     val pageInk: List<PageInkStroke> = emptyList(),
     val textMarkers: List<PageTextMarker> = emptyList(),
+    val pageTextAnnotations: List<PageTextAnnotation> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = createdAt
 ) {
@@ -71,6 +72,18 @@ data class PageTextMarkerBounds(
     val pageHeight: Float
 )
 
+data class PageTextAnnotation(
+    val id: String,
+    val pageIndex: Int,
+    val text: String,
+    val normalizedX: Float,
+    val normalizedY: Float,
+    val normalizedWidth: Float = 0.36f,
+    val normalizedFontSize: Float = 0.028f,
+    val color: Long = DEFAULT_TEXT_ANNOTATION_COLOR,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 data class CanvasInkStroke(
     val id: String,
     val tool: InkTool,
@@ -109,6 +122,9 @@ internal fun CarrotWorkspace.toJson(): JSONObject {
         .put("textMarkers", JSONArray().also { array ->
             textMarkers.forEach { marker -> array.put(marker.toJson()) }
         })
+        .put("pageTextAnnotations", JSONArray().also { array ->
+            pageTextAnnotations.forEach { annotation -> array.put(annotation.toJson()) }
+        })
         .put("createdAt", createdAt)
         .put("updatedAt", updatedAt)
 }
@@ -122,6 +138,9 @@ internal fun workspaceFromJson(json: JSONObject): CarrotWorkspace {
         canvas = canvasFromJson(json.optJSONObject("canvas")),
         pageInk = pageInkFromJson(json.optJSONArray("pageInk")),
         textMarkers = textMarkersFromJson(json.optJSONArray("textMarkers")),
+        pageTextAnnotations = pageTextAnnotationsFromJson(
+            json.optJSONArray("pageTextAnnotations")
+        ),
         createdAt = json.optLong("createdAt", System.currentTimeMillis()),
         updatedAt = json.optLong("updatedAt", 0L)
     )
@@ -208,6 +227,19 @@ private fun PageTextMarkerBounds.toJson(): JSONObject {
         .put("bottom", bottom.toDouble())
         .put("pageWidth", pageWidth.toDouble())
         .put("pageHeight", pageHeight.toDouble())
+}
+
+private fun PageTextAnnotation.toJson(): JSONObject {
+    return JSONObject()
+        .put("id", id)
+        .put("pageIndex", pageIndex)
+        .put("text", text)
+        .put("normalizedX", normalizedX.toDouble())
+        .put("normalizedY", normalizedY.toDouble())
+        .put("normalizedWidth", normalizedWidth.toDouble())
+        .put("normalizedFontSize", normalizedFontSize.toDouble())
+        .put("color", color)
+        .put("createdAt", createdAt)
 }
 
 private fun List<InkPoint>.toJson(): JSONArray {
@@ -339,6 +371,43 @@ private fun markerBoundsFromJson(array: JSONArray?): List<PageTextMarkerBounds> 
     }
 }
 
+private fun pageTextAnnotationsFromJson(array: JSONArray?): List<PageTextAnnotation> {
+    if (array == null) {
+        return emptyList()
+    }
+
+    return buildList {
+        repeat(array.length()) { index ->
+            val item = array.optJSONObject(index) ?: return@repeat
+            val id = item.optString("id").takeIf { it.isNotBlank() } ?: return@repeat
+            val pageIndex = item.optInt("pageIndex", -1)
+            val text = item.optString("text").trim()
+
+            if (pageIndex < 0 || text.isBlank()) {
+                return@repeat
+            }
+
+            add(
+                PageTextAnnotation(
+                    id = id,
+                    pageIndex = pageIndex,
+                    text = text,
+                    normalizedX = item.optDouble("normalizedX", 0.1).toFloat()
+                        .coerceIn(0f, 0.95f),
+                    normalizedY = item.optDouble("normalizedY", 0.1).toFloat()
+                        .coerceIn(0f, 0.95f),
+                    normalizedWidth = item.optDouble("normalizedWidth", 0.36).toFloat()
+                        .coerceIn(0.15f, 0.9f),
+                    normalizedFontSize = item.optDouble("normalizedFontSize", 0.028).toFloat()
+                        .coerceIn(0.014f, 0.08f),
+                    color = item.optLong("color", DEFAULT_TEXT_ANNOTATION_COLOR),
+                    createdAt = item.optLong("createdAt", 0L)
+                )
+            )
+        }
+    }
+}
+
 private fun pointsFromJson(array: JSONArray?): List<InkPoint> {
     if (array == null) {
         return emptyList()
@@ -362,7 +431,8 @@ private fun inkToolFromJson(raw: String): InkTool {
     return InkTool.entries.firstOrNull { tool -> tool.name == raw } ?: InkTool.Pen
 }
 
-private const val WORKSPACE_SCHEMA_VERSION = 1
+private const val WORKSPACE_SCHEMA_VERSION = 2
 private const val DEFAULT_INK_COLOR = 0xFFFF5A10
 private const val DEFAULT_MARKER_COLOR = 0xFFFFD966
 private const val DEFAULT_INK_WIDTH = 4f
+private const val DEFAULT_TEXT_ANNOTATION_COLOR = 0xFF1D2228

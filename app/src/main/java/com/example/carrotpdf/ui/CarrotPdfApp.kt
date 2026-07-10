@@ -105,7 +105,12 @@ import com.example.carrotpdf.pdf.PdfTextIndexSession
 import com.example.carrotpdf.pdf.PdfTextSelection
 import com.example.carrotpdf.pdf.PdfTextSelectionHandle
 import com.example.carrotpdf.pdf.createAnnotatedPdfExport
+import com.example.carrotpdf.pdf.createCameraImageUri
 import com.example.carrotpdf.pdf.createPdfFromImages
+import com.example.carrotpdf.pdf.appendImagesToPdf
+import com.example.carrotpdf.pdf.removePagesFromPdf
+import com.example.carrotpdf.pdf.remapPageIndexAfterRemoval
+import com.example.carrotpdf.pdf.reserveNextImagePdfTitle
 import com.example.carrotpdf.pdf.PdfPageSize
 import com.example.carrotpdf.pdf.downloadPdf
 import com.example.carrotpdf.pdf.getPdfPageCount
@@ -128,6 +133,7 @@ import com.example.carrotpdf.workspace.CanvasInkStroke
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.PageTextAnnotation
 import com.example.carrotpdf.workspace.PageTextMarker
 import com.example.carrotpdf.workspace.PageTextMarkerBounds
 import com.example.carrotpdf.workspace.WorkspaceCanvas
@@ -194,6 +200,12 @@ private fun CarrotPdfContent(
     var activeSearchResultIndex by remember { mutableIntStateOf(-1) }
     var isLoadingDocument by remember { mutableStateOf(false) }
     var isCreatingImagePdf by remember { mutableStateOf(false) }
+    var isImageSourceDialogOpen by remember { mutableStateOf(false) }
+    var isImageDestinationDialogOpen by remember { mutableStateOf(false) }
+    var pendingImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var pendingCameraImageUri by remember { mutableStateOf<Uri?>(null) }
+    var isPageManagerOpen by remember { mutableStateOf(false) }
+    var isEditingPdf by remember { mutableStateOf(false) }
     var isExportingAnnotatedPdf by remember { mutableStateOf(false) }
     var isExportingWorkspaceData by remember { mutableStateOf(false) }
     var hasRestoredPersistedTabs by remember { mutableStateOf(false) }
@@ -216,22 +228,24 @@ private fun CarrotPdfContent(
     var workspaceCanvasStrokes by remember { mutableStateOf<List<CanvasInkStroke>>(emptyList()) }
     var workspacePageInkStrokes by remember { mutableStateOf<List<PageInkStroke>>(emptyList()) }
     var workspaceTextMarkers by remember { mutableStateOf<List<PageTextMarker>>(emptyList()) }
+    var workspacePageTextAnnotations by remember {
+        mutableStateOf<List<PageTextAnnotation>>(emptyList())
+    }
     var workspaceTextMarkerPreview by remember { mutableStateOf<List<PageTextMarker>>(emptyList()) }
     var loadedWorkspaceTabId by remember { mutableStateOf<String?>(null) }
 
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val isPdfInkActive = isWorkspaceOpen &&
-        workspaceMode == WorkspaceMode.Draw &&
-        workspaceDrawTarget == DrawTarget.Pdf &&
+        workspaceMode == WorkspaceMode.Pdf &&
         (workspaceDrawTool == WorkspaceDrawTool.Pen || workspaceDrawTool == WorkspaceDrawTool.Eraser) &&
         activeTab != null &&
         !activeTab.isMissing
     val isPdfMarkerActive = isWorkspaceOpen &&
-        workspaceMode == WorkspaceMode.Draw &&
-        workspaceDrawTarget == DrawTarget.Pdf &&
+        workspaceMode == WorkspaceMode.Pdf &&
         workspaceDrawTool == WorkspaceDrawTool.Marker &&
         activeTab != null &&
         !activeTab.isMissing
+    val isPdfTextActive = false
     val activePdfInkTool = if (workspaceDrawTool == WorkspaceDrawTool.Eraser) {
         InkTool.Eraser
     } else {
@@ -373,7 +387,7 @@ private fun CarrotPdfContent(
         )
     }
 
-    fun openImagesAsPdf(imageUris: List<Uri>) {
+    fun createNewImageDocument(imageUris: List<Uri>) {
         if (imageUris.isEmpty()) {
             return
         }
@@ -383,9 +397,14 @@ private fun CarrotPdfContent(
 
             val result = try {
                 withContext(Dispatchers.IO) {
+                    val title = reserveNextImagePdfTitle(
+                        context = context.applicationContext,
+                        existingTitles = tabs.map { tab -> tab.title }
+                    )
                     createPdfFromImages(
                         context = context.applicationContext,
-                        imageUris = imageUris
+                        imageUris = imageUris,
+                        title = title
                     )
                 }
             } finally {
@@ -409,11 +428,158 @@ private fun CarrotPdfContent(
         }
     }
 
+    fun appendImagesToCurrentDocument(
+        tab: PdfTab,
+        imageUris: List<Uri>
+    ) {
+        if (imageUris.isEmpty()) {
+            return
+        }
+
+        coroutineScope.launch {
+            isCreatingImagePdf = true
+
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    appendImagesToPdf(
+                        context = context.applicationContext,
+                        sourceUri = tab.uri,
+                        imageUris = imageUris,
+                        title = tab.title
+                    )
+                }
+            } finally {
+                isCreatingImagePdf = false
+            }
+
+            result.onSuccess { editedPdf ->
+                val updatedTab = tab.copy(
+                    uri = editedPdf.uri,
+                    pageCount = 0,
+                    pageSizes = emptyList(),
+                    isMissing = false
+                )
+
+                withContext(Dispatchers.IO) {
+                    workspaceRepository.loadOrCreate(updatedTab)
+                }
+                updateActiveTab(tabs, tab.id) { updatedTab }
+                activeTabId = tab.id
+                persistTabsNow()
+                isChromeVisible = true
+            }.onFailure {
+                Toast.makeText(
+                    context,
+                    "Não foi possível adicionar as imagens ao PDF.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    fun openImagesAsPdf(imageUris: List<Uri>) {
+        if (imageUris.isEmpty()) {
+            return
+        }
+
+        val currentTab = activeTab?.takeUnless { tab -> tab.isMissing }
+
+        if (currentTab == null) {
+            createNewImageDocument(imageUris)
+        } else {
+            pendingImageUris = imageUris
+            isImageDestinationDialogOpen = true
+        }
+    }
+
+    fun removeSelectedPages(
+        tab: PdfTab,
+        removedPageIndices: Set<Int>
+    ) {
+        if (
+            removedPageIndices.isEmpty() ||
+            removedPageIndices.size >= tab.pageCount
+        ) {
+            return
+        }
+
+        val remappedInk = workspacePageInkStrokes.mapNotNull { stroke ->
+            remapPageIndexAfterRemoval(stroke.pageIndex, removedPageIndices)
+                ?.let { pageIndex -> stroke.copy(pageIndex = pageIndex) }
+        }
+        val remappedMarkers = workspaceTextMarkers.mapNotNull { marker ->
+            remapPageIndexAfterRemoval(marker.pageIndex, removedPageIndices)
+                ?.let { pageIndex -> marker.copy(pageIndex = pageIndex) }
+        }
+        val remappedText = workspacePageTextAnnotations.mapNotNull { annotation ->
+            remapPageIndexAfterRemoval(annotation.pageIndex, removedPageIndices)
+                ?.let { pageIndex -> annotation.copy(pageIndex = pageIndex) }
+        }
+
+        coroutineScope.launch {
+            isEditingPdf = true
+
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    removePagesFromPdf(
+                        context = context.applicationContext,
+                        sourceUri = tab.uri,
+                        pageIndices = removedPageIndices,
+                        title = tab.title
+                    )
+                }
+            } finally {
+                isEditingPdf = false
+            }
+
+            result.onSuccess { editedPdf ->
+                val removedBeforeOrAtCurrent = removedPageIndices.count { pageIndex ->
+                    pageIndex <= tab.currentPageIndex
+                }
+                val updatedTab = tab.copy(
+                    uri = editedPdf.uri,
+                    currentPageIndex = (tab.currentPageIndex - removedBeforeOrAtCurrent)
+                        .coerceIn(0, editedPdf.pageCount - 1),
+                    pageCount = 0,
+                    pageSizes = emptyList(),
+                    isMissing = false
+                )
+
+                withContext(Dispatchers.IO) {
+                    workspaceRepository.updatePageInkStrokes(updatedTab, remappedInk)
+                    workspaceRepository.updateTextMarkers(updatedTab, remappedMarkers)
+                    workspaceRepository.updatePageTextAnnotations(updatedTab, remappedText)
+                }
+
+                workspacePageInkStrokes = remappedInk
+                workspaceTextMarkers = remappedMarkers
+                workspacePageTextAnnotations = remappedText
+                workspaceTextMarkerPreview = emptyList()
+                updateActiveTab(tabs, tab.id) { updatedTab }
+                activeTabId = tab.id
+                persistTabsNow()
+                isPageManagerOpen = false
+                Toast.makeText(
+                    context,
+                    "Páginas removidas.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }.onFailure {
+                Toast.makeText(
+                    context,
+                    "Não foi possível remover as páginas.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
     suspend fun exportablePdfUri(tab: PdfTab): Uri? {
         val pageInk = workspacePageInkStrokes
         val textMarkers = workspaceTextMarkers
+        val textAnnotations = workspacePageTextAnnotations
 
-        if (pageInk.isEmpty() && textMarkers.isEmpty()) {
+        if (pageInk.isEmpty() && textMarkers.isEmpty() && textAnnotations.isEmpty()) {
             return tab.uri
         }
 
@@ -426,7 +592,8 @@ private fun CarrotPdfContent(
                     sourceUri = tab.uri,
                     title = tab.title,
                     pageInkStrokes = pageInk,
-                    textMarkers = textMarkers
+                    textMarkers = textMarkers,
+                    textAnnotations = textAnnotations
                 ).getOrThrow().uri
             }
         } catch (_: Throwable) {
@@ -556,8 +723,19 @@ private fun CarrotPdfContent(
             }
         }
     )
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { saved ->
+            val imageUri = pendingCameraImageUri
+            pendingCameraImageUri = null
+
+            if (saved && imageUri != null) {
+                openImagesAsPdf(listOf(imageUri))
+            }
+        }
+    )
     val openImages = {
-        imagePicker.launch(arrayOf("image/*"))
+        isImageSourceDialogOpen = true
     }
 
     BackHandler(enabled = isSearchVisible) {
@@ -642,7 +820,7 @@ private fun CarrotPdfContent(
         }
     }
 
-    LaunchedEffect(activeTabId) {
+    LaunchedEffect(activeTabId, activeTab?.uri) {
         closeSearch()
         linkRegions.clear()
         selectedExternalLink = null
@@ -653,6 +831,7 @@ private fun CarrotPdfContent(
         workspaceCanvasStrokes = emptyList()
         workspacePageInkStrokes = emptyList()
         workspaceTextMarkers = emptyList()
+        workspacePageTextAnnotations = emptyList()
         workspaceTextMarkerPreview = emptyList()
         textMarkerPreviewJob[0]?.cancel()
         textMarkerPreviewJob[0] = null
@@ -666,6 +845,7 @@ private fun CarrotPdfContent(
                 workspaceCanvasStrokes = workspace.canvas.strokes
                 workspacePageInkStrokes = workspace.pageInk
                 workspaceTextMarkers = workspace.textMarkers
+                workspacePageTextAnnotations = workspace.pageTextAnnotations
                 loadedWorkspaceTabId = tab.id
             }
         }
@@ -806,6 +986,23 @@ private fun CarrotPdfContent(
         }
     }
 
+    LaunchedEffect(activeTab?.id, loadedWorkspaceTabId, workspacePageTextAnnotations) {
+        val tab = activeTab ?: return@LaunchedEffect
+
+        if (loadedWorkspaceTabId != tab.id) {
+            return@LaunchedEffect
+        }
+
+        delay(WORKSPACE_SAVE_DEBOUNCE_MS)
+
+        withContext(Dispatchers.IO) {
+            workspaceRepository.updatePageTextAnnotations(
+                tab = tab,
+                annotations = workspacePageTextAnnotations
+            )
+        }
+    }
+
     LaunchedEffect(activeTab?.id, activeLinkSession) {
         linkRegions.clear()
         selectedExternalLink = null
@@ -868,24 +1065,27 @@ private fun CarrotPdfContent(
         ) {
             val useSideWorkspace = isWorkspaceOpen &&
                 !isWorkspaceExpanded &&
-                !(workspaceMode == WorkspaceMode.Draw && workspaceDrawTarget == DrawTarget.Pdf) &&
+                workspaceMode != WorkspaceMode.Pdf &&
                 maxWidth >= TABLET_WORKSPACE_BREAKPOINT &&
                 maxWidth > maxHeight
             val sideWorkspaceWidth = (maxWidth * TABLET_WORKSPACE_WIDTH_RATIO)
                 .coerceIn(TABLET_WORKSPACE_MIN_WIDTH, TABLET_WORKSPACE_MAX_WIDTH)
             val maximumBottomWorkspaceHeight = maxHeight.coerceAtLeast(0.dp)
             val preferredBottomWorkspaceHeight = if (
-                workspaceMode == WorkspaceMode.Draw &&
-                workspaceDrawTarget == DrawTarget.Pdf
+                workspaceMode == WorkspaceMode.Pdf
             ) {
                 WORKSPACE_PDF_DRAW_HEIGHT
             } else if (isWorkspaceExpanded) {
                 (maxHeight - statusBarTop - TOP_BAR_HEIGHT - navigationBarBottom - 12.dp)
             } else {
-                WORKSPACE_DEFAULT_HEIGHT
+                maxOf(WORKSPACE_DEFAULT_HEIGHT, maxHeight * WORKSPACE_HALF_HEIGHT_RATIO)
             }
             val minimumBottomWorkspaceHeight = minOf(
-                WORKSPACE_DEFAULT_HEIGHT,
+                if (workspaceMode == WorkspaceMode.Pdf) {
+                    WORKSPACE_PDF_DRAW_HEIGHT
+                } else {
+                    WORKSPACE_DEFAULT_HEIGHT
+                },
                 maximumBottomWorkspaceHeight
             )
             val bottomWorkspaceHeight = preferredBottomWorkspaceHeight.coerceIn(
@@ -906,8 +1106,10 @@ private fun CarrotPdfContent(
                 pageInkStrokes = workspacePageInkStrokes,
                 pageTextMarkers = (workspaceTextMarkers + workspaceTextMarkerPreview)
                     .distinctBy { marker -> marker.stableMarkerKey() },
+                pageTextAnnotations = workspacePageTextAnnotations,
                 isPdfInkActive = isPdfInkActive,
                 isPdfMarkerActive = isPdfMarkerActive,
+                isPdfTextActive = isPdfTextActive,
                 pdfInkTool = activePdfInkTool,
                 pdfInkColor = workspaceInkColor,
                 pdfInkWidth = activePdfInkWidth,
@@ -988,6 +1190,7 @@ private fun CarrotPdfContent(
                         erasePoints = points
                     )
                 },
+                onPdfTextAnnotationTap = {},
                 onPdfTextMarkerGesture = { pageIndex, points, visualScale, commit ->
                     val session = activeTextIndexSession ?: return@ReaderStage
                     val tabId = activeTabId
@@ -1268,8 +1471,8 @@ private fun CarrotPdfContent(
                     FloatingAnnotationButton(
                         onClick = {
                             isWorkspaceOpen = true
-                            workspaceMode = WorkspaceMode.Draw
-                            workspaceDrawTarget = DrawTarget.Pdf
+                            isWorkspaceExpanded = false
+                            workspaceMode = WorkspaceMode.Pdf
                             workspaceDrawTool = WorkspaceDrawTool.Pen
                             selectedExternalLink = null
                             selectedTextSelection = null
@@ -1350,7 +1553,7 @@ private fun CarrotPdfContent(
                 }
             }
 
-            if (isCreatingImagePdf) {
+            if (isCreatingImagePdf || isEditingPdf) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1358,7 +1561,7 @@ private fun CarrotPdfContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Criando PDF...",
+                        text = if (isEditingPdf) "Atualizando PDF..." else "Criando PDF...",
                         color = Color.White,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold
@@ -1378,20 +1581,22 @@ private fun CarrotPdfContent(
                     },
                     selectedMode = workspaceMode,
                     onModeChange = { mode ->
+                        if (mode != workspaceMode) {
+                            isWorkspaceExpanded = false
+                        }
                         workspaceMode = mode
-                        if (mode == WorkspaceMode.Draw && workspaceDrawTarget == DrawTarget.Pdf) {
+                        workspaceDrawTarget = if (mode == WorkspaceMode.Pdf) {
+                            DrawTarget.Pdf
+                        } else {
+                            DrawTarget.Canvas
+                        }
+                        if (mode == WorkspaceMode.Pdf) {
                             selectedExternalLink = null
                             selectedTextSelection = null
                         }
                     },
-                    selectedDrawTarget = workspaceDrawTarget,
-                    onDrawTargetChange = { target ->
-                        workspaceDrawTarget = target
-                        if (target == DrawTarget.Pdf) {
-                            selectedExternalLink = null
-                            selectedTextSelection = null
-                        }
-                    },
+                    selectedDrawTarget = if (workspaceMode == WorkspaceMode.Pdf) DrawTarget.Pdf else DrawTarget.Canvas,
+                    onDrawTargetChange = {},
                     selectedDrawTool = workspaceDrawTool,
                     onDrawToolChange = { tool ->
                         workspaceDrawTool = tool
@@ -1408,10 +1613,32 @@ private fun CarrotPdfContent(
                     onCanvasStrokesChange = { strokes ->
                         workspaceCanvasStrokes = strokes
                     },
-                    pageInkStrokeCount = workspacePageInkStrokes.size,
+                    pageInkStrokeCount = workspacePageInkStrokes.size +
+                        workspaceTextMarkers.size +
+                        workspacePageTextAnnotations.size,
                     onUndoPageInk = {
-                        if (workspacePageInkStrokes.isNotEmpty()) {
-                            workspacePageInkStrokes = workspacePageInkStrokes.dropLast(1)
+                        val latestInk = workspacePageInkStrokes.maxByOrNull { stroke -> stroke.createdAt }
+                        val latestMarker = workspaceTextMarkers.maxByOrNull { marker -> marker.createdAt }
+                        val latestText = workspacePageTextAnnotations.maxByOrNull { annotation -> annotation.createdAt }
+                        val latestTime = maxOf(
+                            latestInk?.createdAt ?: Long.MIN_VALUE,
+                            latestMarker?.createdAt ?: Long.MIN_VALUE,
+                            latestText?.createdAt ?: Long.MIN_VALUE
+                        )
+
+                        when (latestTime) {
+                            latestInk?.createdAt -> {
+                                workspacePageInkStrokes = workspacePageInkStrokes
+                                    .filterNot { stroke -> stroke.id == latestInk.id }
+                            }
+                            latestMarker?.createdAt -> {
+                                workspaceTextMarkers = workspaceTextMarkers
+                                    .filterNot { marker -> marker.id == latestMarker.id }
+                            }
+                            latestText?.createdAt -> {
+                                workspacePageTextAnnotations = workspacePageTextAnnotations
+                                    .filterNot { annotation -> annotation.id == latestText.id }
+                            }
                         }
                     },
                     onCollapse = {
@@ -1472,6 +1699,7 @@ private fun CarrotPdfContent(
             if (isOverflowOpen) {
                 ReaderMenuPopup(
                     hasDocument = activeTab != null && !activeTab.isMissing,
+                    canManagePages = activeTab?.pageCount?.let { count -> count > 1 } == true,
                     onOpenPdf = {
                         isOverflowOpen = false
                         openPdf()
@@ -1479,6 +1707,10 @@ private fun CarrotPdfContent(
                     onOpenImages = {
                         isOverflowOpen = false
                         openImages()
+                    },
+                    onManagePages = {
+                        isOverflowOpen = false
+                        isPageManagerOpen = true
                     },
                     onExportData = {
                         val tab = activeTab
@@ -1545,6 +1777,87 @@ private fun CarrotPdfContent(
                         isOverflowOpen = false
                     }
                 )
+            }
+
+            if (isImageSourceDialogOpen) {
+                ImageSourceDialog(
+                    onTakePhoto = {
+                        isImageSourceDialogOpen = false
+
+                        runCatching {
+                            createCameraImageUri(context.applicationContext)
+                        }.onSuccess { uri ->
+                            pendingCameraImageUri = uri
+
+                            try {
+                                cameraLauncher.launch(uri)
+                            } catch (_: ActivityNotFoundException) {
+                                pendingCameraImageUri = null
+                                Toast.makeText(
+                                    context,
+                                    "Nenhum aplicativo de câmera disponível.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }.onFailure {
+                            Toast.makeText(
+                                context,
+                                "Não foi possível preparar a câmera.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    onChooseImages = {
+                        isImageSourceDialogOpen = false
+                        imagePicker.launch(arrayOf("image/*"))
+                    },
+                    onDismiss = {
+                        isImageSourceDialogOpen = false
+                    }
+                )
+            }
+
+            if (isImageDestinationDialogOpen) {
+                val tab = activeTab
+
+                if (tab != null && pendingImageUris.isNotEmpty()) {
+                    ImageDestinationDialog(
+                        currentDocumentTitle = tab.title,
+                        imageCount = pendingImageUris.size,
+                        onAppendToCurrent = {
+                            val images = pendingImageUris
+                            pendingImageUris = emptyList()
+                            isImageDestinationDialogOpen = false
+                            appendImagesToCurrentDocument(tab, images)
+                        },
+                        onCreateNew = {
+                            val images = pendingImageUris
+                            pendingImageUris = emptyList()
+                            isImageDestinationDialogOpen = false
+                            createNewImageDocument(images)
+                        },
+                        onDismiss = {
+                            pendingImageUris = emptyList()
+                            isImageDestinationDialogOpen = false
+                        }
+                    )
+                }
+            }
+
+            if (isPageManagerOpen) {
+                val tab = activeTab
+
+                if (tab != null && tab.pageCount > 1) {
+                    PageManagerDialog(
+                        pageCount = tab.pageCount,
+                        onRemovePages = { pages ->
+                            removeSelectedPages(tab, pages)
+                        },
+                        onDismiss = {
+                            isPageManagerOpen = false
+                        }
+                    )
+                }
             }
 
             selectedExternalLink?.let { link ->
@@ -1972,6 +2285,7 @@ val TABLET_WORKSPACE_MIN_WIDTH = 320.dp
 val TABLET_WORKSPACE_MAX_WIDTH = 440.dp
 val TABLET_WORKSPACE_OUTER_GAP = 14.dp
 const val TABLET_WORKSPACE_WIDTH_RATIO = 0.34f
+const val WORKSPACE_HALF_HEIGHT_RATIO = 0.48f
 const val PAGE_INK_ERASER_RADIUS = 0.022f
 
 private fun Float.toPdfInkWidth(): Float {

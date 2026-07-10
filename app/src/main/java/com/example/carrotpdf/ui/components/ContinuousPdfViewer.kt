@@ -11,11 +11,14 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -58,6 +61,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.carrotpdf.pdf.PdfLinkRegion
 import com.example.carrotpdf.pdf.PdfLinkTarget
 import com.example.carrotpdf.pdf.PdfPageSize
@@ -80,6 +84,7 @@ import com.example.carrotpdf.ui.viewer.viewport.PdfViewport
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.PageTextAnnotation
 import com.example.carrotpdf.workspace.PageTextMarker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -101,14 +106,17 @@ fun ContinuousPdfViewer(
     pageSizes: List<PdfPageSize> = emptyList(),
     pageInkStrokes: List<PageInkStroke> = emptyList(),
     pageTextMarkers: List<PageTextMarker> = emptyList(),
+    pageTextAnnotations: List<PageTextAnnotation> = emptyList(),
     isPdfInkActive: Boolean = false,
     isPdfMarkerActive: Boolean = false,
+    isPdfTextActive: Boolean = false,
     pdfInkTool: InkTool = InkTool.Pen,
     pdfInkColor: Long = DEFAULT_PDF_INK_COLOR,
     pdfInkWidth: Float = DEFAULT_PDF_INK_WIDTH,
     onLinkTap: (PdfLinkRegion) -> Unit = {},
     onPdfInkStroke: (PageInkStroke) -> Unit = {},
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit = { _, _ -> },
+    onPdfTextAnnotationTap: (PageTextAnnotation) -> Unit = {},
     onPdfTextMarkerGesture: (
         pageIndex: Int,
         points: List<InkPoint>,
@@ -496,8 +504,10 @@ fun ContinuousPdfViewer(
                                 linkRegions = linkRegions.linkRegionsForPage(pageIndex),
                                 pageInkStrokes = pageInkStrokes.pageInkStrokesForPage(pageIndex),
                                 pageTextMarkers = pageTextMarkers.pageTextMarkersForPage(pageIndex),
+                                pageTextAnnotations = pageTextAnnotations.pageTextAnnotationsForPage(pageIndex),
                                 isPdfInkActive = isPdfInkActive,
                                 isPdfMarkerActive = isPdfMarkerActive,
+                                isPdfTextActive = isPdfTextActive,
                                 pdfInkTool = pdfInkTool,
                                 pdfInkColor = pdfInkColor,
                                 pdfInkWidth = pdfInkWidth,
@@ -508,6 +518,7 @@ fun ContinuousPdfViewer(
                                 onLinkTap = onLinkTap,
                                 onPdfInkStroke = onPdfInkStroke,
                                 onPdfInkErase = onPdfInkErase,
+                                onPdfTextAnnotationTap = onPdfTextAnnotationTap,
                                 onPdfTextMarkerGesture = onPdfTextMarkerGesture,
                                 onTextLongPress = onTextLongPress,
                                 onTextSelectionHandleDrag = onTextSelectionHandleDrag,
@@ -567,8 +578,10 @@ private fun PdfPageItem(
     linkRegions: List<PdfLinkRegion>,
     pageInkStrokes: List<PageInkStroke>,
     pageTextMarkers: List<PageTextMarker>,
+    pageTextAnnotations: List<PageTextAnnotation>,
     isPdfInkActive: Boolean,
     isPdfMarkerActive: Boolean,
+    isPdfTextActive: Boolean,
     pdfInkTool: InkTool,
     pdfInkColor: Long,
     pdfInkWidth: Float,
@@ -578,6 +591,7 @@ private fun PdfPageItem(
     onLinkTap: (PdfLinkRegion) -> Unit,
     onPdfInkStroke: (PageInkStroke) -> Unit,
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
+    onPdfTextAnnotationTap: (PageTextAnnotation) -> Unit,
     onPdfTextMarkerGesture: (
         pageIndex: Int,
         points: List<InkPoint>,
@@ -695,6 +709,11 @@ private fun PdfPageItem(
                             modifier = Modifier.fillMaxSize()
                         )
 
+                        PdfTextAnnotationOverlay(
+                            annotations = pageTextAnnotations,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
                         SearchHighlightOverlay(
                             results = searchResults,
                             activeSearchResult = activeSearchResult,
@@ -733,6 +752,14 @@ private fun PdfPageItem(
                                 pageIndex = pageIndex,
                                 visualScale = visualScale,
                                 onMarkerGesture = onPdfTextMarkerGesture,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (isPdfTextActive) {
+                            PdfTextAnnotationInputOverlay(
+                                pageIndex = pageIndex,
+                                annotations = pageTextAnnotations,
+                                color = pdfInkColor,
+                                onAnnotationTap = onPdfTextAnnotationTap,
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
@@ -885,6 +912,107 @@ private fun TextMarkerOverlay(
 }
 
 @Composable
+private fun PdfTextAnnotationOverlay(
+    annotations: List<PageTextAnnotation>,
+    modifier: Modifier = Modifier
+) {
+    if (annotations.isEmpty()) {
+        return
+    }
+
+    BoxWithConstraints(modifier = modifier) {
+        annotations.forEach { annotation ->
+            Text(
+                text = annotation.text,
+                color = Color(annotation.color.toInt()),
+                fontSize = (maxWidth.value * annotation.normalizedFontSize)
+                    .coerceIn(9f, 40f)
+                    .sp,
+                modifier = Modifier
+                    .offset(
+                        x = maxWidth * annotation.normalizedX,
+                        y = maxHeight * annotation.normalizedY
+                    )
+                    .width(maxWidth * annotation.normalizedWidth)
+                    .background(Color.White.copy(alpha = 0.68f), RoundedCornerShape(3.dp))
+                    .padding(horizontal = 3.dp, vertical = 1.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PdfTextAnnotationInputOverlay(
+    pageIndex: Int,
+    annotations: List<PageTextAnnotation>,
+    color: Long,
+    onAnnotationTap: (PageTextAnnotation) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val viewConfiguration = LocalViewConfiguration.current
+    val currentOnAnnotationTap = rememberUpdatedState(onAnnotationTap)
+
+    Box(
+        modifier = modifier.pointerInput(pageIndex, annotations) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var wasMultiTouch = false
+                var moved = false
+
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val pressed = event.changes.filter { change -> change.pressed }
+
+                    if (pressed.size > 1) {
+                        wasMultiTouch = true
+                    }
+
+                    if (event.changes.any { change ->
+                            (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+                        }
+                    ) {
+                        moved = true
+                    }
+
+                    if (pressed.isEmpty()) {
+                        if (!wasMultiTouch && !moved && size.width > 0 && size.height > 0) {
+                            val normalizedX = (down.position.x / size.width).coerceIn(0f, 1f)
+                            val normalizedY = (down.position.y / size.height).coerceIn(0f, 1f)
+                            val existing = annotations.lastOrNull { annotation ->
+                                val estimatedHeight = (
+                                    annotation.normalizedFontSize *
+                                        annotation.text.lines().size.coerceAtLeast(1) *
+                                        1.6f
+                                    ).coerceAtLeast(0.045f)
+
+                                normalizedX in annotation.normalizedX..(
+                                    annotation.normalizedX + annotation.normalizedWidth
+                                    ).coerceAtMost(1f) &&
+                                    normalizedY in annotation.normalizedY..(
+                                    annotation.normalizedY + estimatedHeight
+                                    ).coerceAtMost(1f)
+                            }
+
+                            currentOnAnnotationTap.value(
+                                existing ?: PageTextAnnotation(
+                                    id = UUID.randomUUID().toString(),
+                                    pageIndex = pageIndex,
+                                    text = "",
+                                    normalizedX = normalizedX.coerceAtMost(0.64f),
+                                    normalizedY = normalizedY.coerceAtMost(0.94f),
+                                    color = color
+                                )
+                            )
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
 private fun PdfPageInkOverlay(
     strokes: List<PageInkStroke>,
     previewPoints: List<InkPoint>,
@@ -958,6 +1086,12 @@ private fun PdfTextMarkerInputOverlay(
                 while (true) {
                     val event = awaitPointerEvent()
                     val pressedChanges = event.changes.filter { change -> change.pressed }
+                    val stylusIsPresent = pressedChanges.any { change ->
+                        change.isStylusLikePointer()
+                    }
+                    pressedChanges.consumePalmContactsWhenStylusActive(
+                        stylusActive = isStylusGesture || stylusIsPresent
+                    )
                     val activeWasReleased = event.changes.any { change ->
                         change.id == activePointerId && !change.pressed
                     }
@@ -1079,6 +1213,12 @@ private fun PdfPageInkInputOverlay(
                 while (true) {
                     val event = awaitPointerEvent()
                     val pressedChanges = event.changes.filter { change -> change.pressed }
+                    val stylusIsPresent = pressedChanges.any { change ->
+                        change.isStylusLikePointer()
+                    }
+                    pressedChanges.consumePalmContactsWhenStylusActive(
+                        stylusActive = isStylusGesture || stylusIsPresent
+                    )
                     val activeWasReleased = event.changes.any { change ->
                         change.id == activePointerId && !change.pressed
                     }
@@ -1288,6 +1428,12 @@ private fun List<PageInkStroke>.pageInkStrokesForPage(pageIndex: Int): List<Page
 
 private fun List<PageTextMarker>.pageTextMarkersForPage(pageIndex: Int): List<PageTextMarker> {
     return filter { marker -> marker.pageIndex == pageIndex && marker.bounds.isNotEmpty() }
+}
+
+private fun List<PageTextAnnotation>.pageTextAnnotationsForPage(
+    pageIndex: Int
+): List<PageTextAnnotation> {
+    return filter { annotation -> annotation.pageIndex == pageIndex }
 }
 
 private fun expandHighlightRect(
@@ -1753,8 +1899,8 @@ private const val SEARCH_TARGET_VERTICAL_ANCHOR = 0.35f
 private const val MANUAL_SCROLL_IDLE_DEBOUNCE_MS = 180L
 private const val LINK_TAP_MAX_DURATION_MS = 700L
 private const val LINK_DOUBLE_TAP_WINDOW_MS = 650L
-private const val PDF_TEXT_SELECTION_EXTRA_LONG_PRESS_MS = 220L
-private const val PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO = 0.45f
+private const val PDF_TEXT_SELECTION_EXTRA_LONG_PRESS_MS = 20L
+private const val PDF_TEXT_SELECTION_CANCEL_SLOP_RATIO = 1.20f
 private const val HIGHLIGHT_VERTICAL_EXPANSION_RATIO = 0.24f
 private const val DEFAULT_PDF_INK_COLOR = 0xFFFF7A1AL
 private const val DEFAULT_PDF_INK_WIDTH = 0.0048f

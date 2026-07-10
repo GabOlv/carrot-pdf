@@ -26,7 +26,8 @@ data class GeneratedImagePdf(
 
 fun createPdfFromImages(
     context: Context,
-    imageUris: List<Uri>
+    imageUris: List<Uri>,
+    title: String
 ): Result<GeneratedImagePdf> = runCatching {
     require(imageUris.isNotEmpty()) { "No images selected." }
 
@@ -35,8 +36,11 @@ fun createPdfFromImages(
     }
     cleanupOldGeneratedPdfs(outputDirectory)
 
-    val title = buildGeneratedPdfTitle(imageUris.size)
-    val outputFile = File(outputDirectory, title)
+    val resolvedTitle = title.ensureImagePdfFileName()
+    val outputFile = File(
+        outputDirectory,
+        "${resolvedTitle.removeSuffix(".pdf")}-${System.currentTimeMillis()}.pdf"
+    )
     val document = PdfDocument()
 
     try {
@@ -82,11 +86,11 @@ fun createPdfFromImages(
 
     GeneratedImagePdf(
         uri = uri,
-        title = title
+        title = resolvedTitle
     )
 }
 
-private fun decodeImageForPdf(
+internal fun decodeImageForPdf(
     context: Context,
     uri: Uri
 ): Bitmap {
@@ -185,13 +189,46 @@ private fun calculateFitCenterRect(
     )
 }
 
-private fun buildGeneratedPdfTitle(imageCount: Int): String {
-    val suffix = System.currentTimeMillis()
-    return if (imageCount == 1) {
-        "imagem-$suffix.pdf"
-    } else {
-        "imagens-$suffix.pdf"
-    }
+fun reserveNextImagePdfTitle(
+    context: Context,
+    existingTitles: Collection<String>
+): String {
+    val preferences = context.getSharedPreferences(
+        IMAGE_PDF_NAME_PREFERENCES,
+        Context.MODE_PRIVATE
+    )
+    val lastReservedIndex = preferences.getInt(IMAGE_PDF_LAST_INDEX_KEY, -1)
+    val nextIndex = nextImagePdfIndex(
+        existingTitles = existingTitles,
+        lastReservedIndex = lastReservedIndex
+    )
+
+    preferences.edit()
+        .putInt(IMAGE_PDF_LAST_INDEX_KEY, nextIndex)
+        .apply()
+
+    return "image-pdf-$nextIndex.pdf"
+}
+
+internal fun nextImagePdfIndex(
+    existingTitles: Collection<String>,
+    lastReservedIndex: Int
+): Int {
+    val greatestExistingIndex = existingTitles
+        .mapNotNull { title ->
+            IMAGE_PDF_TITLE_REGEX.matchEntire(title.trim())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toIntOrNull()
+        }
+        .maxOrNull()
+        ?: -1
+
+    return maxOf(greatestExistingIndex, lastReservedIndex) + 1
+}
+
+private fun String.ensureImagePdfFileName(): String {
+    return if (endsWith(".pdf", ignoreCase = true)) this else "$this.pdf"
 }
 
 private fun cleanupOldGeneratedPdfs(directory: File) {
@@ -206,3 +243,7 @@ private fun cleanupOldGeneratedPdfs(directory: File) {
             runCatching { file.delete() }
         }
 }
+
+private val IMAGE_PDF_TITLE_REGEX = Regex("image-pdf-(\\d+)(?:\\.pdf)?", RegexOption.IGNORE_CASE)
+private const val IMAGE_PDF_NAME_PREFERENCES = "image_pdf_names"
+private const val IMAGE_PDF_LAST_INDEX_KEY = "last_index"

@@ -112,6 +112,7 @@ import com.example.carrotpdf.ui.viewer.state.rememberPdfViewerState
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.PageTextAnnotation
 import com.example.carrotpdf.workspace.PageTextMarker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -132,8 +133,10 @@ fun ReaderStage(
     pageSizes: List<PdfPageSize>,
     pageInkStrokes: List<PageInkStroke>,
     pageTextMarkers: List<PageTextMarker>,
+    pageTextAnnotations: List<PageTextAnnotation>,
     isPdfInkActive: Boolean,
     isPdfMarkerActive: Boolean,
+    isPdfTextActive: Boolean,
     pdfInkTool: InkTool,
     pdfInkColor: Long,
     pdfInkWidth: Float,
@@ -152,6 +155,7 @@ fun ReaderStage(
     onLinkTap: (PdfLinkRegion) -> Unit,
     onPdfInkStroke: (PageInkStroke) -> Unit,
     onPdfInkErase: (pageIndex: Int, points: List<InkPoint>) -> Unit,
+    onPdfTextAnnotationTap: (PageTextAnnotation) -> Unit,
     onPdfTextMarkerGesture: (
         pageIndex: Int,
         points: List<InkPoint>,
@@ -228,14 +232,17 @@ fun ReaderStage(
                     pageSizes = pageSizes,
                     pageInkStrokes = pageInkStrokes,
                     pageTextMarkers = pageTextMarkers,
+                    pageTextAnnotations = pageTextAnnotations,
                     isPdfInkActive = isPdfInkActive,
                     isPdfMarkerActive = isPdfMarkerActive,
+                    isPdfTextActive = isPdfTextActive,
                     pdfInkTool = pdfInkTool,
                     pdfInkColor = pdfInkColor,
                     pdfInkWidth = pdfInkWidth,
                     onLinkTap = onLinkTap,
                     onPdfInkStroke = onPdfInkStroke,
                     onPdfInkErase = onPdfInkErase,
+                    onPdfTextAnnotationTap = onPdfTextAnnotationTap,
                     onPdfTextMarkerGesture = onPdfTextMarkerGesture,
                     onTextLongPress = onTextLongPress,
                     onTextSelectionHandleDrag = onTextSelectionHandleDrag,

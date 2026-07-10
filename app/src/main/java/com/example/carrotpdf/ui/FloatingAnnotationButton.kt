@@ -45,6 +45,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,6 +78,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -89,6 +91,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.carrotpdf.model.PdfTab
+import com.example.carrotpdf.R
 import com.example.carrotpdf.model.PdfTabPersistence
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.pdf.createPdfFromImages
@@ -139,54 +142,12 @@ fun FloatingAnnotationButton(
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(27.dp)) {
-            val body = Color.White.copy(alpha = 0.96f)
-            val green = Color(0xFF78D66A)
-            val stroke = 2.4.dp.toPx()
-
-            drawLine(
-                color = body,
-                start = Offset(7.dp.toPx(), 21.dp.toPx()),
-                end = Offset(18.dp.toPx(), 10.dp.toPx()),
-                strokeWidth = 4.8.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = Color(0xFFFF7A1A).copy(alpha = 0.92f),
-                start = Offset(9.dp.toPx(), 19.dp.toPx()),
-                end = Offset(15.dp.toPx(), 13.dp.toPx()),
-                strokeWidth = 1.1.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = body,
-                start = Offset(17.dp.toPx(), 8.dp.toPx()),
-                end = Offset(22.dp.toPx(), 13.dp.toPx()),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = green,
-                start = Offset(19.dp.toPx(), 8.dp.toPx()),
-                end = Offset(24.dp.toPx(), 4.dp.toPx()),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = green,
-                start = Offset(21.dp.toPx(), 10.dp.toPx()),
-                end = Offset(26.dp.toPx(), 8.dp.toPx()),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = green.copy(alpha = 0.9f),
-                start = Offset(20.dp.toPx(), 8.dp.toPx()),
-                end = Offset(22.dp.toPx(), 3.dp.toPx()),
-                strokeWidth = 1.6.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-        }
+        Icon(
+            painter = painterResource(R.drawable.ic_pen_nib),
+            contentDescription = "Annotate PDF",
+            tint = Color.White.copy(alpha = 0.96f),
+            modifier = Modifier.size(27.dp)
+        )
     }
 }
 
@@ -213,36 +174,12 @@ fun FloatingScreenshotButton(
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(25.dp)) {
-            val icon = Color.White.copy(alpha = 0.92f)
-            val stroke = 2.dp.toPx()
-
-            drawRoundRect(
-                color = icon,
-                topLeft = Offset(5.dp.toPx(), 6.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(15.dp.toPx(), 13.dp.toPx()),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.5.dp.toPx()),
-                style = Stroke(width = stroke)
-            )
-            drawRoundRect(
-                color = icon,
-                topLeft = Offset(8.dp.toPx(), 3.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(9.dp.toPx(), 5.dp.toPx()),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.8.dp.toPx()),
-                style = Stroke(width = stroke)
-            )
-            drawCircle(
-                color = icon,
-                radius = 3.1.dp.toPx(),
-                center = Offset(12.5.dp.toPx(), 12.5.dp.toPx()),
-                style = Stroke(width = stroke)
-            )
-            drawCircle(
-                color = Color(0xFFFF7A1A),
-                radius = 1.1.dp.toPx(),
-                center = Offset(18.dp.toPx(), 8.dp.toPx())
-            )
-        }
+        Icon(
+            painter = painterResource(R.drawable.ic_screenshot),
+            contentDescription = "Capture page",
+            tint = Color.White.copy(alpha = 0.92f),
+            modifier = Modifier.size(25.dp)
+        )
     }
 }
 

@@ -126,6 +126,26 @@ class WorkspaceRepository(
         return updated
     }
 
+    fun updatePageTextAnnotations(
+        tab: PdfTab,
+        annotations: List<PageTextAnnotation>
+    ): CarrotWorkspace {
+        val now = System.currentTimeMillis()
+        val workspace = loadOrCreate(tab)
+
+        if (workspace.pageTextAnnotations == annotations) {
+            return workspace
+        }
+
+        val updated = workspace.copy(
+            pageTextAnnotations = annotations,
+            updatedAt = now
+        )
+
+        save(updated)
+        return updated
+    }
+
     fun load(tabId: String): CarrotWorkspace? {
         val file = workspaceFile(tabId)
 

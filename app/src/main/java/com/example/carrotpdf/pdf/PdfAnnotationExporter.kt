@@ -6,6 +6,7 @@ import androidx.core.content.FileProvider
 import com.example.carrotpdf.workspace.InkPoint
 import com.example.carrotpdf.workspace.InkTool
 import com.example.carrotpdf.workspace.PageInkStroke
+import com.example.carrotpdf.workspace.PageTextAnnotation
 import com.example.carrotpdf.workspace.PageTextMarker
 import com.example.carrotpdf.workspace.PageTextMarkerBounds
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -15,6 +16,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.min
@@ -29,9 +31,14 @@ fun createAnnotatedPdfExport(
     sourceUri: Uri,
     title: String,
     pageInkStrokes: List<PageInkStroke>,
-    textMarkers: List<PageTextMarker> = emptyList()
+    textMarkers: List<PageTextMarker> = emptyList(),
+    textAnnotations: List<PageTextAnnotation> = emptyList()
 ): Result<AnnotatedPdfExport> = runCatching {
-    require(pageInkStrokes.isNotEmpty() || textMarkers.isNotEmpty()) { "No PDF annotations to export." }
+    require(
+        pageInkStrokes.isNotEmpty() ||
+            textMarkers.isNotEmpty() ||
+            textAnnotations.isNotEmpty()
+    ) { "No PDF annotations to export." }
 
     PDFBoxResourceLoader.init(context.applicationContext)
 
@@ -48,15 +55,20 @@ fun createAnnotatedPdfExport(
     val markersByPage = textMarkers
         .filter { marker -> marker.bounds.isNotEmpty() }
         .groupBy { marker -> marker.pageIndex }
+    val textAnnotationsByPage = textAnnotations
+        .filter { annotation -> annotation.text.isNotBlank() }
+        .groupBy { annotation -> annotation.pageIndex }
 
     context.contentResolver.openInputStream(sourceUri)?.use { input ->
         PDDocument.load(input).use { document ->
-            (strokesByPage.keys + markersByPage.keys).forEach { pageIndex ->
+            (strokesByPage.keys + markersByPage.keys + textAnnotationsByPage.keys)
+                .forEach { pageIndex ->
                 if (pageIndex in 0 until document.numberOfPages) {
                     document.getPage(pageIndex).appendAnnotations(
                         document = document,
                         strokes = strokesByPage[pageIndex].orEmpty(),
-                        markers = markersByPage[pageIndex].orEmpty()
+                        markers = markersByPage[pageIndex].orEmpty(),
+                        textAnnotations = textAnnotationsByPage[pageIndex].orEmpty()
                     )
                 }
             }
@@ -80,7 +92,8 @@ fun createAnnotatedPdfExport(
 private fun PDPage.appendAnnotations(
     document: PDDocument,
     strokes: List<PageInkStroke>,
-    markers: List<PageTextMarker>
+    markers: List<PageTextMarker>,
+    textAnnotations: List<PageTextAnnotation>
 ) {
     if (rotation != 0) {
         return
@@ -108,6 +121,13 @@ private fun PDPage.appendAnnotations(
             )
         }
 
+        textAnnotations.forEach { annotation ->
+            contentStream.drawPageTextAnnotation(
+                annotation = annotation,
+                pageBox = pageBox
+            )
+        }
+
         strokes.forEach { stroke ->
             contentStream.drawInkStroke(
                 stroke = stroke,
@@ -117,6 +137,83 @@ private fun PDPage.appendAnnotations(
     } finally {
         contentStream.close()
     }
+}
+
+private fun PDPageContentStream.drawPageTextAnnotation(
+    annotation: PageTextAnnotation,
+    pageBox: PDRectangle
+) {
+    val font = PDType1Font.HELVETICA
+    val fontSize = (pageBox.width * annotation.normalizedFontSize)
+        .coerceIn(MIN_TEXT_SIZE_PT, MAX_TEXT_SIZE_PT)
+    val maxWidth = (pageBox.width * annotation.normalizedWidth)
+        .coerceAtLeast(fontSize * 3f)
+    val lines = annotation.text.wrapPdfText(
+        font = font,
+        fontSize = fontSize,
+        maxWidth = maxWidth
+    )
+    val color = annotation.color.toPdfRgb()
+    val x = pageBox.lowerLeftX + annotation.normalizedX * pageBox.width
+    val topY = pageBox.lowerLeftY + (1f - annotation.normalizedY) * pageBox.height
+
+    beginText()
+    setFont(font, fontSize)
+    setNonStrokingColor(
+        color.red / 255f,
+        color.green / 255f,
+        color.blue / 255f
+    )
+    newLineAtOffset(x, topY - fontSize)
+
+    lines.forEachIndexed { index, line ->
+        if (index > 0) {
+            newLineAtOffset(0f, -fontSize * TEXT_LINE_HEIGHT)
+        }
+        showText(line.toPdfSafeText())
+    }
+
+    endText()
+}
+
+private fun String.wrapPdfText(
+    font: PDType1Font,
+    fontSize: Float,
+    maxWidth: Float
+): List<String> {
+    return lines().flatMap { paragraph ->
+        if (paragraph.isBlank()) {
+            listOf("")
+        } else {
+            val result = mutableListOf<String>()
+            var current = ""
+
+            paragraph.trim().split(Regex("\\s+")).forEach { word ->
+                val candidate = if (current.isBlank()) word else "$current $word"
+                val candidateWidth = runCatching {
+                    font.getStringWidth(candidate.toPdfSafeText()) / 1000f * fontSize
+                }.getOrDefault(maxWidth + 1f)
+
+                if (candidateWidth <= maxWidth || current.isBlank()) {
+                    current = candidate
+                } else {
+                    result += current
+                    current = word
+                }
+            }
+
+            if (current.isNotBlank()) {
+                result += current
+            }
+            result.ifEmpty { listOf("") }
+        }
+    }
+}
+
+private fun String.toPdfSafeText(): String {
+    return map { char ->
+        if (char.code in 32..255) char else '?'
+    }.joinToString("")
 }
 
 private fun PDPageContentStream.drawTextMarker(
@@ -310,3 +407,6 @@ private const val MIN_INK_STROKE_WIDTH_PT = 0.75f
 private const val MAX_INK_STROKE_WIDTH_PT = 18f
 private const val PDF_ROUND_LINE_CAP = 1
 private const val PDF_ROUND_LINE_JOIN = 1
+private const val MIN_TEXT_SIZE_PT = 8f
+private const val MAX_TEXT_SIZE_PT = 42f
+private const val TEXT_LINE_HEIGHT = 1.25f

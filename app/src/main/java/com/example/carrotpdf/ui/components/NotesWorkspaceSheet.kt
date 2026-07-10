@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,11 +51,13 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.example.carrotpdf.R
 import com.example.carrotpdf.ui.design.CarrotColors
 import com.example.carrotpdf.workspace.CanvasInkStroke
 import com.example.carrotpdf.workspace.DEFAULT_CANVAS_HEIGHT
@@ -70,7 +73,8 @@ import kotlin.math.min
 
 enum class WorkspaceMode {
     Notes,
-    Draw
+    Canvas,
+    Pdf
 }
 
 enum class DrawTarget {
@@ -165,23 +169,17 @@ fun NotesWorkspaceSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Spacer(modifier = Modifier.weight(1f))
-                WorkspaceModeButton(
-                    mode = WorkspaceMode.Notes,
-                    selected = selectedMode == WorkspaceMode.Notes,
-                    onClick = {
-                        onModeChange(WorkspaceMode.Notes)
-                    }
-                )
+                WorkspaceMode.entries.forEach { mode ->
+                    WorkspaceModeButton(
+                        mode = mode,
+                        selected = selectedMode == mode,
+                        onClick = { onModeChange(mode) }
+                    )
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                WorkspaceModeButton(
-                    mode = WorkspaceMode.Draw,
-                    selected = selectedMode == WorkspaceMode.Draw,
-                    onClick = {
-                        onModeChange(WorkspaceMode.Draw)
+                    if (mode != WorkspaceMode.entries.last()) {
+                        Spacer(modifier = Modifier.width(8.dp))
                     }
-                )
+                }
                 Spacer(modifier = Modifier.weight(1f))
                 WorkspaceCollapseButton(onClick = onCollapse)
             }
@@ -196,8 +194,8 @@ fun NotesWorkspaceSheet(
                     modifier = Modifier.weight(1f)
                 )
 
-                WorkspaceMode.Draw -> DrawWorkspace(
-                    selectedDrawTarget = selectedDrawTarget,
+                WorkspaceMode.Canvas -> DrawWorkspace(
+                    selectedDrawTarget = DrawTarget.Canvas,
                     onDrawTargetChange = onDrawTargetChange,
                     selectedDrawTool = selectedDrawTool,
                     onDrawToolChange = onDrawToolChange,
@@ -211,6 +209,24 @@ fun NotesWorkspaceSheet(
                     onUndoPageInk = onUndoPageInk,
                     isSideLayout = isSideLayout,
                     isExpanded = isExpanded,
+                    modifier = Modifier.weight(1f)
+                )
+
+                WorkspaceMode.Pdf -> DrawWorkspace(
+                    selectedDrawTarget = DrawTarget.Pdf,
+                    onDrawTargetChange = onDrawTargetChange,
+                    selectedDrawTool = selectedDrawTool,
+                    onDrawToolChange = onDrawToolChange,
+                    selectedInkColor = selectedInkColor,
+                    onInkColorChange = onInkColorChange,
+                    selectedStrokeWidth = selectedStrokeWidth,
+                    onStrokeWidthChange = onStrokeWidthChange,
+                    canvasStrokes = canvasStrokes,
+                    onCanvasStrokesChange = onCanvasStrokesChange,
+                    pageInkStrokeCount = pageInkStrokeCount,
+                    onUndoPageInk = onUndoPageInk,
+                    isSideLayout = isSideLayout,
+                    isExpanded = false,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -479,6 +495,12 @@ private fun FreeDrawCanvas(
                         while (true) {
                             val event = awaitPointerEvent()
                             val pressedChanges = event.changes.filter { change -> change.pressed }
+                            val stylusIsPresent = pressedChanges.any { change ->
+                                change.isStylusLikePointer()
+                            }
+                            pressedChanges.consumePalmContactsWhenStylusActive(
+                                stylusActive = isStylusGesture || stylusIsPresent
+                            )
                             val activeWasReleased = event.changes.any { change ->
                                 change.id == activePointerId && !change.pressed
                             }
@@ -676,27 +698,9 @@ private fun DrawControlHeader(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        DrawTargetButton(
-            target = DrawTarget.Canvas,
-            selected = selectedDrawTarget == DrawTarget.Canvas,
-            onClick = {
-                onDrawTargetChange(DrawTarget.Canvas)
-            }
-        )
-
-        DrawTargetButton(
-            target = DrawTarget.Pdf,
-            selected = selectedDrawTarget == DrawTarget.Pdf,
-            onClick = {
-                onDrawTargetChange(DrawTarget.Pdf)
-            }
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
         CompactDrawToolButton(
             tool = WorkspaceDrawTool.Pen,
             selected = selectedTool == WorkspaceDrawTool.Pen,
@@ -779,7 +783,7 @@ private fun CompactDrawToolButton(
 
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(42.dp)
             .semantics {
                 contentDescription = tool.accessibleLabel()
             }
@@ -795,12 +799,12 @@ private fun CompactDrawToolButton(
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(20.dp)) {
-            drawToolIcon(
-                tool = tool,
-                color = iconColor
-            )
-        }
+        Icon(
+            painter = painterResource(tool.iconResource()),
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
@@ -952,12 +956,12 @@ private fun DrawToolButton(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(modifier = Modifier.size(22.dp)) {
-                drawToolIcon(
-                    tool = tool,
-                    color = iconColor
-                )
-            }
+            Icon(
+                painter = painterResource(tool.iconResource()),
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size(22.dp)
+            )
         }
 
         Text(
@@ -1195,32 +1199,37 @@ private fun WorkspaceModeButton(
     onClick: () -> Unit
 ) {
     val iconColor = if (selected) CarrotColors.Accent else Color(0xFF2D343B)
-    val underlineColor = if (selected) CarrotColors.Accent else Color.Transparent
 
     Column(
         modifier = Modifier
             .semantics {
                 contentDescription = mode.accessibleLabel()
             }
-            .clickable { onClick() },
+            .background(
+                color = if (selected) CarrotColors.Accent.copy(alpha = 0.12f) else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .border(
+                width = if (selected) 1.dp else 0.dp,
+                color = if (selected) CarrotColors.Accent else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Canvas(modifier = Modifier.size(24.dp)) {
-            drawWorkspaceModeIcon(
-                mode = mode,
-                color = iconColor
-            )
-        }
-
-        Spacer(modifier = Modifier.height(5.dp))
-
-        Box(
-            modifier = Modifier
-                .size(width = 30.dp, height = 2.dp)
-                .background(
-                    color = underlineColor,
-                    shape = RoundedCornerShape(999.dp)
-                )
+        Icon(
+            painter = painterResource(mode.iconResource()),
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+            text = mode.visibleLabel(),
+            color = iconColor,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
         )
     }
 }
@@ -1626,7 +1635,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawWorkspaceModeIc
             drawLine(color, Offset(8.dp.toPx(), 19.dp.toPx()), Offset(13.dp.toPx(), 19.dp.toPx()), stroke, StrokeCap.Round)
         }
 
-        WorkspaceMode.Draw -> {
+        WorkspaceMode.Canvas -> {
             drawLine(color, Offset(6.dp.toPx(), 16.dp.toPx()), Offset(16.dp.toPx(), 6.dp.toPx()), 3.2.dp.toPx(), StrokeCap.Round)
             drawLine(color, Offset(15.dp.toPx(), 5.dp.toPx()), Offset(19.dp.toPx(), 9.dp.toPx()), stroke, StrokeCap.Round)
             drawLine(color, Offset(5.dp.toPx(), 19.dp.toPx()), Offset(9.dp.toPx(), 18.dp.toPx()), stroke, StrokeCap.Round)
@@ -1638,6 +1647,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawWorkspaceModeIc
                 topLeft = Offset(7.dp.toPx(), 15.dp.toPx()),
                 size = Size(12.dp.toPx(), 6.dp.toPx()),
                 style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
+            )
+        }
+
+        WorkspaceMode.Pdf -> {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(5.dp.toPx(), 3.dp.toPx()),
+                size = Size(14.dp.toPx(), 18.dp.toPx()),
+                style = Stroke(width = stroke),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
             )
         }
     }
@@ -1767,7 +1786,33 @@ private fun WorkspaceDrawTool.accessibleLabel(): String {
 private fun WorkspaceMode.accessibleLabel(): String {
     return when (this) {
         WorkspaceMode.Notes -> "Open notes"
-        WorkspaceMode.Draw -> "Open drawing tools"
+        WorkspaceMode.Canvas -> "Open drawing canvas"
+        WorkspaceMode.Pdf -> "Annotate PDF"
+    }
+}
+
+private fun WorkspaceMode.visibleLabel(): String {
+    return when (this) {
+        WorkspaceMode.Notes -> "Notes"
+        WorkspaceMode.Canvas -> "Canvas"
+        WorkspaceMode.Pdf -> "PDF"
+    }
+}
+
+private fun WorkspaceMode.iconResource(): Int {
+    return when (this) {
+        WorkspaceMode.Notes -> R.drawable.ic_notes
+        WorkspaceMode.Canvas -> R.drawable.ic_canvas
+        WorkspaceMode.Pdf -> R.drawable.ic_pdf
+    }
+}
+
+private fun WorkspaceDrawTool.iconResource(): Int {
+    return when (this) {
+        WorkspaceDrawTool.Pen -> R.drawable.ic_pencil
+        WorkspaceDrawTool.Marker -> R.drawable.ic_highlighter
+        WorkspaceDrawTool.Move -> R.drawable.ic_move
+        WorkspaceDrawTool.Eraser -> R.drawable.ic_eraser
     }
 }
 

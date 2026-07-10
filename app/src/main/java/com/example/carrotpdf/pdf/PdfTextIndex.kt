@@ -666,7 +666,7 @@ private fun PdfTextGlyph.isNear(
     y: Float,
     toleranceScale: Float = 1f
 ): Boolean {
-    val safeToleranceScale = toleranceScale.coerceIn(0.20f, 1.5f)
+    val safeToleranceScale = toleranceScale.coerceIn(0.30f, 1.75f)
     val horizontalTolerance = maxOf(
         TEXT_HIT_MIN_HORIZONTAL_TOLERANCE_PT,
         width * TEXT_HIT_WIDTH_TOLERANCE_RATIO
@@ -729,42 +729,61 @@ internal fun extractPdfTextIndex(
 private fun extractPdfTextIndexOnePageAtATime(
     document: PDDocument
 ): List<PdfTextIndexedPage> {
-    val stripper = PDFTextStripper()
-
     return buildList {
         for (pageIndex in 0 until document.numberOfPages) {
-            stripper.startPage = pageIndex + 1
-            stripper.endPage = pageIndex + 1
-            val page = document.getPage(pageIndex)
-            val mediaBox = page.mediaBox
+            val indexedPage = runCatching {
+                PdfTextIndexCollector(firstPageIndex = pageIndex)
+                    .extract(
+                        document = document,
+                        startPageIndex = pageIndex,
+                        endPageIndex = pageIndex
+                    )
+                    .firstOrNull()
+            }.getOrNull()
 
-            add(
-                PdfTextIndexedPage(
-                    pageIndex = pageIndex,
-                    text = runCatching {
-                        stripper.getText(document)
-                    }.getOrDefault(""),
-                    glyphs = emptyList(),
-                    pageWidth = mediaBox.width,
-                    pageHeight = mediaBox.height
+            if (indexedPage != null) {
+                add(indexedPage)
+            } else {
+                val stripper = PDFTextStripper().apply {
+                    startPage = pageIndex + 1
+                    endPage = pageIndex + 1
+                    sortByPosition = true
+                }
+                val page = document.getPage(pageIndex)
+                val mediaBox = page.mediaBox
+
+                add(
+                    PdfTextIndexedPage(
+                        pageIndex = pageIndex,
+                        text = runCatching { stripper.getText(document) }.getOrDefault(""),
+                        glyphs = emptyList(),
+                        pageWidth = mediaBox.width,
+                        pageHeight = mediaBox.height
+                    )
                 )
-            )
+            }
         }
     }
 }
 
-private class PdfTextIndexCollector : PDFTextStripper() {
+private class PdfTextIndexCollector(
+    firstPageIndex: Int = 0
+) : PDFTextStripper() {
     private val pages = mutableListOf<PdfTextIndexedPage>()
-    private var currentPageIndex = -1
+    private var currentPageIndex = firstPageIndex - 1
     private var currentPageWidth = 0f
     private var currentPageHeight = 0f
     private var currentPageText = StringBuilder()
     private var currentPageGlyphs = mutableListOf<PdfTextGlyph>()
 
-    fun extract(document: PDDocument): List<PdfTextIndexedPage> {
-        sortByPosition = false
-        startPage = 1
-        endPage = document.numberOfPages
+    fun extract(
+        document: PDDocument,
+        startPageIndex: Int = 0,
+        endPageIndex: Int = document.numberOfPages - 1
+    ): List<PdfTextIndexedPage> {
+        sortByPosition = true
+        startPage = startPageIndex + 1
+        endPage = endPageIndex + 1
         getText(document)
         return pages.toList()
     }
@@ -809,12 +828,16 @@ private class PdfTextIndexCollector : PDFTextStripper() {
     }
 
     override fun writeWordSeparator() {
-        currentPageText.append(' ')
+        if (currentPageText.isNotEmpty() && currentPageText.lastOrNull()?.isWhitespace() != true) {
+            currentPageText.append(' ')
+        }
         super.writeWordSeparator()
     }
 
     override fun writeLineSeparator() {
-        currentPageText.append('\n')
+        if (currentPageText.isNotEmpty() && currentPageText.lastOrNull() != '\n') {
+            currentPageText.append('\n')
+        }
         super.writeLineSeparator()
     }
 
@@ -859,7 +882,7 @@ private class PdfTextIndexCollector : PDFTextStripper() {
 private fun TextPosition.toGlyph(
     sourceIndex: Int
 ): PdfTextGlyph? {
-    if (dir != 0f || pageWidth <= 0f || pageHeight <= 0f) {
+    if (pageWidth <= 0f || pageHeight <= 0f) {
         return null
     }
 
@@ -888,10 +911,10 @@ private fun TextPosition.toGlyph(
     )
 }
 
-private const val TEXT_HIT_MIN_HORIZONTAL_TOLERANCE_PT = 2.5f
-private const val TEXT_HIT_MIN_VERTICAL_TOLERANCE_PT = 1.25f
-private const val TEXT_HIT_WIDTH_TOLERANCE_RATIO = 0.50f
-private const val TEXT_HIT_HEIGHT_TOLERANCE_RATIO = 0.38f
+private const val TEXT_HIT_MIN_HORIZONTAL_TOLERANCE_PT = 6f
+private const val TEXT_HIT_MIN_VERTICAL_TOLERANCE_PT = 4f
+private const val TEXT_HIT_WIDTH_TOLERANCE_RATIO = 0.75f
+private const val TEXT_HIT_HEIGHT_TOLERANCE_RATIO = 0.72f
 private const val TEXT_SELECTION_UPSHIFT_RATIO = 0.92f
 private const val TEXT_SELECTION_VERTICAL_INSET_RATIO = 0.04f
 private const val TEXT_SELECTION_VERTICAL_DISTANCE_WEIGHT = 4f

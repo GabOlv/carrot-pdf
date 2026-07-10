@@ -3,4 +3,7 @@
     <cache-path
         name="generated_pdfs"
         path="generated_pdfs/" />
+    <cache-path
+        name="camera_images"
+        path="camera_images/" />
 </paths>

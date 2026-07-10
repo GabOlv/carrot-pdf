@@ -114,8 +114,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 @Composable
 fun ReaderMenuPopup(
     hasDocument: Boolean,
+    canManagePages: Boolean,
     onOpenPdf: () -> Unit,
     onOpenImages: () -> Unit,
+    onManagePages: () -> Unit,
     onExportData: () -> Unit,
     onSharePdf: () -> Unit,
     onDownloadPdf: () -> Unit,
@@ -153,19 +155,25 @@ fun ReaderMenuPopup(
         ) {
             MenuAction(
                 text = "Abrir PDF...",
-                icon = MenuIcon.Folder,
+                icon = MenuIcon.OpenPdf,
                 onClick = onOpenPdf
             )
             MenuAction(
                 text = "Abrir imagens...",
-                icon = MenuIcon.PageNumber,
+                icon = MenuIcon.OpenImages,
                 onClick = onOpenImages
             )
             MenuAction(
                 text = "Exportar Dados...",
-                icon = MenuIcon.Download,
+                icon = MenuIcon.Export,
                 onClick = onExportData,
                 enabled = hasDocument
+            )
+            MenuAction(
+                text = "Gerenciar páginas...",
+                icon = MenuIcon.Pages,
+                onClick = onManagePages,
+                enabled = canManagePages
             )
             MenuDivider()
             MenuAction(

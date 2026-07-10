@@ -45,6 +45,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,12 +65,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -77,6 +75,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -89,6 +88,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.carrotpdf.model.PdfTab
+import com.example.carrotpdf.R
 import com.example.carrotpdf.model.PdfTabPersistence
 import com.example.carrotpdf.pdf.PdfSearchResult
 import com.example.carrotpdf.pdf.createPdfFromImages
@@ -147,74 +147,12 @@ fun MenuIconCanvas(
     icon: MenuIcon,
     color: Color
 ) {
-    Canvas(modifier = Modifier.size(24.dp)) {
-        val stroke = 1.8.dp.toPx()
-
-        when (icon) {
-            MenuIcon.Folder -> {
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(3.dp.toPx(), 7.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(18.dp.toPx(), 12.dp.toPx()),
-                    style = Stroke(width = stroke),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                )
-                drawLine(
-                    color = color,
-                    start = Offset(4.dp.toPx(), 8.dp.toPx()),
-                    end = Offset(9.dp.toPx(), 8.dp.toPx()),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round
-                )
-            }
-
-            MenuIcon.PageNumber -> {
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(5.dp.toPx(), 4.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(14.dp.toPx(), 16.dp.toPx()),
-                    style = Stroke(width = stroke),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                )
-                drawLine(color, Offset(9.dp.toPx(), 8.dp.toPx()), Offset(15.dp.toPx(), 8.dp.toPx()), stroke, StrokeCap.Round)
-                drawLine(color, Offset(9.dp.toPx(), 12.dp.toPx()), Offset(15.dp.toPx(), 12.dp.toPx()), stroke, StrokeCap.Round)
-                drawLine(color, Offset(9.dp.toPx(), 16.dp.toPx()), Offset(13.dp.toPx(), 16.dp.toPx()), stroke, StrokeCap.Round)
-            }
-
-            MenuIcon.Share -> {
-                drawCircle(color = color, radius = 2.4.dp.toPx(), center = Offset(7.dp.toPx(), 12.dp.toPx()), style = Stroke(width = stroke))
-                drawCircle(color = color, radius = 2.4.dp.toPx(), center = Offset(16.dp.toPx(), 7.dp.toPx()), style = Stroke(width = stroke))
-                drawCircle(color = color, radius = 2.4.dp.toPx(), center = Offset(16.dp.toPx(), 17.dp.toPx()), style = Stroke(width = stroke))
-                drawLine(color, Offset(9.dp.toPx(), 11.dp.toPx()), Offset(14.dp.toPx(), 8.dp.toPx()), stroke, StrokeCap.Round)
-                drawLine(color, Offset(9.dp.toPx(), 13.dp.toPx()), Offset(14.dp.toPx(), 16.dp.toPx()), stroke, StrokeCap.Round)
-            }
-
-            MenuIcon.Download -> {
-                drawLine(color, Offset(12.dp.toPx(), 4.dp.toPx()), Offset(12.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
-                drawLine(color, Offset(8.dp.toPx(), 11.dp.toPx()), Offset(12.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
-                drawLine(color, Offset(16.dp.toPx(), 11.dp.toPx()), Offset(12.dp.toPx(), 15.dp.toPx()), stroke, StrokeCap.Round)
-                drawLine(color, Offset(6.dp.toPx(), 20.dp.toPx()), Offset(18.dp.toPx(), 20.dp.toPx()), stroke, StrokeCap.Round)
-            }
-
-            MenuIcon.Print -> {
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(6.dp.toPx(), 4.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(12.dp.toPx(), 6.dp.toPx()),
-                    style = Stroke(width = stroke),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx())
-                )
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(4.dp.toPx(), 10.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 8.dp.toPx()),
-                    style = Stroke(width = stroke),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                )
-                drawLine(color, Offset(8.dp.toPx(), 18.dp.toPx()), Offset(16.dp.toPx(), 18.dp.toPx()), stroke, StrokeCap.Round)
-            }
-        }
-    }
+    Icon(
+        painter = painterResource(icon.drawableResource),
+        contentDescription = null,
+        tint = color,
+        modifier = Modifier.size(24.dp)
+    )
 }
 
 @Composable
@@ -237,45 +175,13 @@ fun IconButtonCanvas(
     }
 }
 
-fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBookTabsIcon() {
-    val stroke = 1.8.dp.toPx()
-    val white = Color.White.copy(alpha = 0.92f)
-
-    drawRoundRect(
-        color = white,
-        topLeft = Offset(4.dp.toPx(), 5.dp.toPx()),
-        size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 15.dp.toPx()),
-        style = Stroke(width = stroke),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.5.dp.toPx())
-    )
-    drawLine(
-        color = white,
-        start = Offset(12.dp.toPx(), 5.dp.toPx()),
-        end = Offset(12.dp.toPx(), 20.dp.toPx()),
-        strokeWidth = stroke,
-        cap = StrokeCap.Round
-    )
-    drawLine(
-        color = white.copy(alpha = 0.62f),
-        start = Offset(7.dp.toPx(), 9.dp.toPx()),
-        end = Offset(10.dp.toPx(), 9.dp.toPx()),
-        strokeWidth = 1.2.dp.toPx(),
-        cap = StrokeCap.Round
-    )
-    drawLine(
-        color = white.copy(alpha = 0.62f),
-        start = Offset(14.dp.toPx(), 9.dp.toPx()),
-        end = Offset(17.dp.toPx(), 9.dp.toPx()),
-        strokeWidth = 1.2.dp.toPx(),
-        cap = StrokeCap.Round
-    )
-}
-
-enum class MenuIcon {
-    Folder,
-    PageNumber,
-    Share,
-    Download,
-    Print
+enum class MenuIcon(val drawableResource: Int) {
+    OpenPdf(R.drawable.ic_open_pdf),
+    OpenImages(R.drawable.ic_open_images),
+    Pages(R.drawable.ic_pdf),
+    Export(R.drawable.ic_export_pdf),
+    Share(R.drawable.ic_share_pdf),
+    Download(R.drawable.ic_download_pdf),
+    Print(R.drawable.ic_print_pdf)
 }
 

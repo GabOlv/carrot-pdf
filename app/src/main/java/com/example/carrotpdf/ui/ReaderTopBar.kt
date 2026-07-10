@@ -45,6 +45,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,6 +78,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,6 +90,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import com.example.carrotpdf.R
 import com.example.carrotpdf.model.PdfTab
 import com.example.carrotpdf.model.PdfTabPersistence
 import com.example.carrotpdf.pdf.PdfSearchResult
@@ -199,11 +202,18 @@ fun ReaderTopBar(
                 )
             }
 
-            IconButtonCanvas(
-                contentDescription = "Tabs",
-                onClick = onTabs
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable { onTabs() },
+                contentAlignment = Alignment.Center
             ) {
-                drawBookTabsIcon()
+                Icon(
+                    painter = painterResource(R.drawable.ic_tabs),
+                    contentDescription = "Tabs",
+                    tint = Color.White.copy(alpha = 0.92f),
+                    modifier = Modifier.size(24.dp)
+                )
             }
 
             Box(

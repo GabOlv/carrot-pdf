@@ -5,6 +5,8 @@ import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
+import java.text.Normalizer
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -127,31 +129,100 @@ private fun searchPdfTextWithPdfBox(
 private fun PdfTextIndexedPage.findMatches(
     query: String
 ): List<PdfSearchResult> {
-    val results = mutableListOf<PdfSearchResult>()
+    return findNormalizedPdfMatches(text, query).map { matchRange ->
+        val matchStart = matchRange.first
+        val matchEnd = matchRange.last + 1
+
+        PdfSearchResult(
+            pageIndex = pageIndex,
+            snippet = text.snippetAround(matchStart, matchEnd - matchStart),
+            bounds = boundsForMatch(
+                matchStart = matchStart,
+                matchEnd = matchEnd
+            )
+        )
+    }
+}
+
+internal fun findNormalizedPdfMatches(
+    text: String,
+    query: String
+): List<IntRange> {
+    val searchableText = text.toSearchablePdfText(trackSourceIndices = true)
+    val searchableQuery = query.toSearchablePdfText(trackSourceIndices = false)
+        .value
+        .trim()
+
+    if (searchableText.value.isBlank() || searchableQuery.isBlank()) {
+        return emptyList()
+    }
+
+    val ranges = mutableListOf<IntRange>()
     var searchFrom = 0
 
-    while (searchFrom < text.length) {
-        val matchIndex = text.indexOf(query, startIndex = searchFrom, ignoreCase = true)
+    while (searchFrom < searchableText.value.length) {
+        val normalizedMatchStart = searchableText.value.indexOf(
+            string = searchableQuery,
+            startIndex = searchFrom
+        )
 
-        if (matchIndex < 0) {
+        if (normalizedMatchStart < 0) {
             break
         }
 
-        results.add(
-            PdfSearchResult(
-                pageIndex = pageIndex,
-                snippet = text.snippetAround(matchIndex, query.length),
-                bounds = boundsForMatch(
-                    matchStart = matchIndex,
-                    matchEnd = matchIndex + query.length
-                )
-            )
-        )
+        val normalizedMatchEnd = normalizedMatchStart + searchableQuery.length - 1
+        val sourceStart = searchableText.sourceIndices.getOrNull(normalizedMatchStart)
+        val sourceEnd = searchableText.sourceIndices.getOrNull(normalizedMatchEnd)
 
-        searchFrom = matchIndex + query.length.coerceAtLeast(1)
+        if (sourceStart != null && sourceEnd != null && sourceEnd >= sourceStart) {
+            ranges += sourceStart..sourceEnd
+        }
+
+        searchFrom = normalizedMatchStart + searchableQuery.length.coerceAtLeast(1)
     }
 
-    return results
+    return ranges
+}
+
+private data class SearchablePdfText(
+    val value: String,
+    val sourceIndices: List<Int>
+)
+
+private fun String.toSearchablePdfText(
+    trackSourceIndices: Boolean
+): SearchablePdfText {
+    val normalized = StringBuilder()
+    val sourceIndices = mutableListOf<Int>()
+
+    forEachIndexed { sourceIndex, character ->
+        if (character.isWhitespace()) {
+            if (normalized.isNotEmpty() && normalized.last() != ' ') {
+                normalized.append(' ')
+                if (trackSourceIndices) {
+                    sourceIndices += sourceIndex
+                }
+            }
+        } else {
+            val folded = Normalizer.normalize(character.toString(), Normalizer.Form.NFD)
+                .filter { normalizedCharacter ->
+                    Character.getType(normalizedCharacter) != Character.NON_SPACING_MARK.toInt()
+                }
+                .lowercase(Locale.ROOT)
+
+            folded.forEach { foldedCharacter ->
+                normalized.append(foldedCharacter)
+                if (trackSourceIndices) {
+                    sourceIndices += sourceIndex
+                }
+            }
+        }
+    }
+
+    return SearchablePdfText(
+        value = normalized.toString(),
+        sourceIndices = sourceIndices
+    )
 }
 
 private fun PdfTextIndexedPage.boundsForMatch(
